@@ -10,6 +10,12 @@ v1.1). **The Instagram carousel pipeline described there as deferred has
 since been built** — see "Status vs. the docs" below for exactly what
 changed and the trade-offs that came with it.
 
+**Platform setup, step by step:** [`docs/setup/`](docs/setup/) — do them in
+this order:
+1. [`docs/setup/linkedin.md`](docs/setup/linkedin.md) — Company Page, dev app, products, OAuth
+2. [`docs/setup/facebook.md`](docs/setup/facebook.md) — the Meta Developer App that hosts Instagram's API (this project never publishes to Facebook itself)
+3. [`docs/setup/instagram.md`](docs/setup/instagram.md) — Professional account, permissions, `/auth/instagram`
+
 ## Layout
 
 ```
@@ -19,16 +25,18 @@ assets/Inter-*.ttf        embedded fonts for carousel text rendering
 src/index.ts              cron dispatch, OAuth routes, Telegram webhook
 src/store.ts              MongoStore — the only data layer
 src/secrets.ts            AES-GCM token encryption at rest
+src/errors.ts             ambiguous-vs-clean publish failure classification
 src/research.ts           the Researcher agent (shared by both platforms)
 src/generate.ts           LinkedIn: Writer + Art Director + Editor + FLUX image
 src/carousel.ts           Instagram: SVG slide template generator
 src/rasterize.ts          Instagram: SVG -> PNG via resvg-wasm
 src/instagram-generate.ts Instagram: Carousel Writer + generation pipeline
 src/linkedin.ts           OAuth + publish
-src/instagram.ts          token refresh + publish, incl. real carousel container flow
+src/instagram.ts          OAuth + token refresh + publish, incl. real carousel container flow
 src/telegram.ts           approval gate — single-image and carousel drafts
 src/migrate.ts            one-time index creation
 docs/                     the nine original design docs — read in order
+docs/setup/                platform-by-platform setup guides
 ```
 
 ## Status vs. the docs — what's built beyond v1
@@ -157,9 +165,10 @@ npm run secrets:push     # wrangler secret bulk secrets.json
 npm run deploy
 npm run migrate
 
-# 4. Wire the Telegram webhook, then authorize LinkedIn
+# 4. Wire the Telegram webhook, then authorize both platforms
 curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<worker>/tg/<WEBHOOK_SECRET>"
 # visit https://<worker>/auth/linkedin in a browser, click Allow
+# visit https://<worker>/auth/instagram in a browser, click Allow
 ```
 
 `PUBLIC_R2_BASE`, `LINKEDIN_VERSION`, `LINKEDIN_REDIRECT_URI`, `IMAGE_MODEL`,
@@ -180,10 +189,11 @@ actually deploy or run the spike. `grep -rn "REPLACE_ME\|REPLACE-ME" .`
 | File | Key(s) | Replace with |
 |---|---|---|
 | `wrangler.jsonc` | `PUBLIC_R2_BASE` | The R2 bucket's public URL (custom domain or `r2.dev`) |
-| `wrangler.jsonc` | `LINKEDIN_REDIRECT_URI` | `https://social-worker.<your-subdomain>.workers.dev/auth/linkedin/callback` — must exactly match the LinkedIn app's registered redirect URL |
+| `wrangler.jsonc` | `LINKEDIN_REDIRECT_URI` | `https://social-worker.<your-subdomain>.workers.dev/auth/linkedin/callback` — must exactly match the LinkedIn app's registered redirect URL. See `docs/setup/linkedin.md` |
+| `wrangler.jsonc` | `INSTAGRAM_REDIRECT_URI` | Same subdomain, `/auth/instagram/callback` — registered on the Meta App's Instagram product. See `docs/setup/facebook.md` |
 | `.dev.vars`, `secrets.json` | `MONGODB_URI` | Atlas non-SRV multi-host connection string |
-| `.dev.vars`, `secrets.json` | `LINKEDIN_CLIENT_ID` / `LINKEDIN_CLIENT_SECRET` | From the LinkedIn developer app's Auth tab |
-| `.dev.vars`, `secrets.json` | `IG_USER_ID` | Instagram Professional account's numeric id (v1.1, deferred) |
+| `.dev.vars`, `secrets.json` | `LINKEDIN_CLIENT_ID` / `LINKEDIN_CLIENT_SECRET` | From the LinkedIn developer app's Auth tab. See `docs/setup/linkedin.md` |
+| `.dev.vars`, `secrets.json` | `INSTAGRAM_CLIENT_ID` / `INSTAGRAM_CLIENT_SECRET` | The Meta App's Instagram API credentials. See `docs/setup/facebook.md`. There is no `IG_USER_ID` secret — visiting `/auth/instagram` now captures the IG business user id automatically |
 | `.dev.vars`, `secrets.json` | `GITHUB_PAT` | A PAT with no special scopes, just for search rate limit |
 | `.dev.vars`, `secrets.json` | `TAVILY_API_KEY` | app.tavily.com, free tier |
 | `.dev.vars`, `secrets.json` | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | From @BotFather / @userinfobot |

@@ -55,6 +55,10 @@
     // URL as the OAuth redirect on the LinkedIn app.
     "LINKEDIN_REDIRECT_URI": "https://REPLACE-ME-social-worker.workers.dev/auth/linkedin/callback",
 
+    // DUMMY — same subdomain as above, registered as the OAuth redirect URI
+    // on the Instagram product's API setup screen in the Meta App dashboard.
+    "INSTAGRAM_REDIRECT_URI": "https://REPLACE-ME-social-worker.workers.dev/auth/instagram/callback",
+
     // See docs/09-resources.md for the neuron math behind these.
     "IMAGE_MODEL": "@cf/black-forest-labs/flux-2-klein-4b",
     "TEXT_MODEL": "@cf/openai/gpt-oss-20b",
@@ -65,10 +69,14 @@
   // Secrets — `wrangler secret put <NAME>`. NEVER in this file.
   //
   //   MONGODB_URI            non-SRV multi-host string (mongodb+srv WILL NOT RESOLVE)
-  //   TOKEN_KEY              base64 32 bytes: openssl rand -base64 32
+  //   TOKEN_KEY               base64 32 bytes: openssl rand -base64 32
   //   LINKEDIN_CLIENT_ID
   //   LINKEDIN_CLIENT_SECRET
-  //   IG_USER_ID
+  //   INSTAGRAM_CLIENT_ID    the Meta App's Instagram API "App ID" — NOT IG_USER_ID,
+  //                          which no longer exists as a secret. See src/instagram.ts:
+  //                          visiting /auth/instagram now captures the IG business user
+  //                          id automatically and stores it on the token document.
+  //   INSTAGRAM_CLIENT_SECRET
   //   GITHUB_PAT
   //   TAVILY_API_KEY
   //   TELEGRAM_BOT_TOKEN

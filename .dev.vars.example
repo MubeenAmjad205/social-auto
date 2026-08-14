@@ -4,8 +4,9 @@
 # These are SECRETS -> in production they go via `wrangler secret put` (or
 # `wrangler secret bulk secrets.json`, see secrets.example.json), never in
 # wrangler.jsonc. Non-secret vars (PUBLIC_R2_BASE, LINKEDIN_VERSION,
-# LINKEDIN_REDIRECT_URI, IMAGE_MODEL, TEXT_MODEL, MONGODB_DB) already live in
-# wrangler.jsonc's "vars" block and don't belong here.
+# LINKEDIN_REDIRECT_URI, INSTAGRAM_REDIRECT_URI, IMAGE_MODEL, TEXT_MODEL,
+# MONGODB_DB) already live in wrangler.jsonc's "vars" block and don't belong
+# here.
 
 # Non-SRV multi-host string. Atlas -> Connect -> Drivers -> "Node.js 2.2.12
 # or later". mongodb+srv:// WILL NOT resolve in workerd.
@@ -19,9 +20,12 @@ TOKEN_KEY=
 LINKEDIN_CLIENT_ID=
 LINKEDIN_CLIENT_SECRET=
 
-# Instagram Professional account's numeric user id (v1.1, deferred — fill in
-# whenever you get to it).
-IG_USER_ID=
+# The Meta App's Instagram API "App ID"/secret (API setup with Instagram
+# login screen, not the general Facebook Login product). There is no
+# IG_USER_ID secret anymore — visiting /auth/instagram captures the IG
+# business user id automatically and stores it with the token. See docs/setup/instagram.md.
+INSTAGRAM_CLIENT_ID=
+INSTAGRAM_CLIENT_SECRET=
 
 # GitHub personal access token — raises search API limit 60/hr -> 5,000/hr.
 # No scopes needed, it's only used for public repo search.
