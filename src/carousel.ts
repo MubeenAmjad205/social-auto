@@ -111,7 +111,10 @@ function wrap(text: string, maxWidth: number, fontSize: number, bold: boolean): 
   const avgCharWidth = fontSize * (bold ? 0.62 : 0.55);
   const maxChars = Math.max(8, Math.floor(maxWidth / avgCharWidth));
 
-  const words = text.trim().split(/\s+/);
+  // A single word longer than a full line (a URL, an unbroken identifier)
+  // would otherwise sail past the 1080px slide edge with nothing to stop
+  // it — greedy wrapping only breaks between words. Force-break it first.
+  const words = text.trim().split(/\s+/).flatMap(w => hardBreak(w, maxChars));
   const lines: string[] = [];
   let current = '';
 
@@ -126,6 +129,13 @@ function wrap(text: string, maxWidth: number, fontSize: number, bold: boolean): 
   }
   if (current) lines.push(current);
   return lines;
+}
+
+function hardBreak(word: string, maxChars: number): string[] {
+  if (word.length <= maxChars) return [word];
+  const chunks: string[] = [];
+  for (let i = 0; i < word.length; i += maxChars) chunks.push(word.slice(i, i + maxChars));
+  return chunks;
 }
 
 function escapeXml(s: string): string {

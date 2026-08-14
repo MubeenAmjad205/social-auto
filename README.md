@@ -79,6 +79,50 @@ stops:
     two embedded font weights). Still comfortably under the 3MB compressed
     free-plan cap, but worth knowing if you add more to the bundle later.
 
+Update: the font-family risk above is now resolved rather than open —
+`assets/Inter-*.ttf`'s embedded family name was checked directly (`fonttools`
+name table, ID 1) and is exactly `"Inter"` in both weights, matching what
+`src/carousel.ts` and `src/rasterize.ts` request. Text rendering should not
+silently fail on a name mismatch.
+
+## Hardening pass — bugs found and fixed after the initial build
+
+A self-review after the v1.1 build turned up several real gaps, since fixed:
+
+- **Telegram webhook had no sender authorization check.** The unguessable
+  webhook URL was the only thing standing between a stranger and approving
+  drafts under your name. `src/telegram.ts` now verifies the update's
+  `chat.id` against `TELEGRAM_CHAT_ID` before doing anything else.
+- **The LinkedIn approval message could silently truncate the post text**
+  (Telegram's 1024-char photo-caption limit vs. a post plus flags). Approval
+  text now always goes out as its own message, capped at Telegram's 4096-char
+  message limit instead — same pattern the carousel flow already used.
+- **`idempotency_key` didn't actually prevent duplicate posts** — it guarded
+  the database, not the LinkedIn/Instagram API call itself. `src/errors.ts`
+  now distinguishes a clean non-2xx response (safe to retry) from a
+  network-level failure with no response at all (genuinely ambiguous — the
+  post may have gone out). Ambiguous failures now stop auto-retrying and page
+  you to check manually, instead of silently re-queuing.
+- **Seed selection had a race window and burned seeds on failure.**
+  `nextSeed()` now atomically claims a seed in one `findOneAndUpdate` instead
+  of read-then-write-later. Seeds are now returned to the pool (not
+  permanently burned) when a draft is rejected or when generation fails after
+  claiming a seed.
+- **`fetch()` routes had no error handling.** Only `scheduled()` reported
+  failures to Telegram; a bug in the OAuth callback or the webhook itself
+  failed silently. Both are now wrapped, same as crons.
+- **OAuth `state` was generated but never checked** on the LinkedIn callback
+  — a CSRF gap. It now round-trips through a short-lived HttpOnly cookie and
+  is verified before exchanging the code.
+- **Carousel word-wrap had no long-word fallback** — a single unbreakable
+  token could overflow the slide edge. Long words now force-break.
+
+Also added, as direct value-adds rather than bug fixes: `/pending` (list
+active drafts from Telegram without waiting for the next message), `/status`
+now shows the last run's health, `/seed <note> | angle: <text>` syntax, and a
+⭐ button on published LinkedIn posts to save that image as a style ref
+without touching Atlas directly.
+
 ## Setup
 
 ```bash
