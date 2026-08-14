@@ -1,0 +1,77 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "social-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+
+  // nodejs_compat is REQUIRED for the mongodb driver — it needs node:net and
+  // node:tls, both of which workerd now implements. Do not remove it.
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Free plan: 5 Cron Triggers per account. All five now used — the "one
+  // spare" docs/02 and docs/07 mention went to Instagram carousel generation
+  // below, since v1.1 is now built rather than deferred.
+  // ALL TIMES ARE UTC. You are UTC+5 (PKT) — subtract 5 from local time.
+  "triggers": {
+    "crons": [
+      "0 2 * * *",   // 07:00 PKT — generate LinkedIn draft, send to Telegram
+      "0 4 * * *",   // 09:00 PKT — publish approved LinkedIn
+      "0 6 * * *",   // 11:00 PKT — generate Instagram carousel, send to Telegram
+      "0 9 * * *",   // 14:00 PKT — publish approved Instagram
+      "0 22 * * *"   // 03:00 PKT — token health + seed queue check
+    ]
+  },
+
+  "ai": { "binding": "AI" },
+
+  // Bundler rules for binary assets used by the Instagram carousel renderer
+  // (src/carousel.ts + src/rasterize.ts): the resvg WASM binary and the two
+  // embedded font weights it rasterizes text with.
+  "rules": [
+    { "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true },
+    { "type": "Data", "globs": ["**/*.ttf"], "fallthrough": true }
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "social-media"
+    }
+  ],
+
+  "vars": {
+    // DUMMY — replace once the R2 bucket has a public URL (custom domain or
+    // its r2.dev subdomain). MUST be publicly readable — Instagram fetches
+    // this URL itself and will not accept file bytes. robots.txt on this
+    // domain must not block Meta's crawler.
+    "PUBLIC_R2_BASE": "https://REPLACE-ME-media.example.workers.dev",
+
+    // Mandatory on /rest/* calls. Versions are sunset on a rolling basis —
+    // bump this quarterly and re-test.
+    "LINKEDIN_VERSION": "202608",
+
+    // DUMMY — replace with the real workers.dev subdomain (`wrangler whoami`
+    // or the Cloudflare dashboard) once deployed, and register the exact same
+    // URL as the OAuth redirect on the LinkedIn app.
+    "LINKEDIN_REDIRECT_URI": "https://REPLACE-ME-social-worker.workers.dev/auth/linkedin/callback",
+
+    // See docs/09-resources.md for the neuron math behind these.
+    "IMAGE_MODEL": "@cf/black-forest-labs/flux-2-klein-4b",
+    "TEXT_MODEL": "@cf/openai/gpt-oss-20b",
+
+    "MONGODB_DB": "social"
+  }
+
+  // Secrets — `wrangler secret put <NAME>`. NEVER in this file.
+  //
+  //   MONGODB_URI            non-SRV multi-host string (mongodb+srv WILL NOT RESOLVE)
+  //   TOKEN_KEY              base64 32 bytes: openssl rand -base64 32
+  //   LINKEDIN_CLIENT_ID
+  //   LINKEDIN_CLIENT_SECRET
+  //   IG_USER_ID
+  //   GITHUB_PAT
+  //   TAVILY_API_KEY
+  //   TELEGRAM_BOT_TOKEN
+  //   TELEGRAM_CHAT_ID
+  //   WEBHOOK_SECRET
+}
