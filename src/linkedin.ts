@@ -8,6 +8,7 @@
 
 import type { Env } from './index';
 import type { Store, Draft } from './store';
+import { fetchOrAmbiguous } from './errors';
 
 const AUTH = 'https://www.linkedin.com/oauth/v2/authorization';
 const TOKEN = 'https://www.linkedin.com/oauth/v2/accessToken';
@@ -19,18 +20,37 @@ const API = 'https://api.linkedin.com';
 // are the entire reason the project is on Workers rather than GitHub Actions.
 
 export function startLinkedInAuth(env: Env): Response {
+  const state = crypto.randomUUID();
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: env.LINKEDIN_CLIENT_ID,
     redirect_uri: env.LINKEDIN_REDIRECT_URI,
     scope: 'w_member_social openid profile',
-    state: crypto.randomUUID(),
+    state,
   });
-  return Response.redirect(`${AUTH}?${params}`, 302);
+  // Stateless CSRF guard: `state` round-trips through LinkedIn's redirect and
+  // gets checked against this cookie on callback below. Workers isolates are
+  // ephemeral, so there's no session store to keep a server-side nonce in —
+  // a short-lived HttpOnly cookie does the same job without one. Previously
+  // `state` was generated and sent but never actually verified on return.
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: `${AUTH}?${params}`,
+      'Set-Cookie': `li_oauth_state=${state}; HttpOnly; Secure; SameSite=Lax; Max-Age=600; Path=/auth/linkedin`,
+    },
+  });
 }
 
 export async function handleLinkedInCallback(request: Request, env: Env): Promise<Response> {
-  const code = new URL(request.url).searchParams.get('code');
+  const url = new URL(request.url);
+  const code = url.searchParams.get('code');
+  const returnedState = url.searchParams.get('state');
+  const cookieState = getCookie(request, 'li_oauth_state');
+
+  if (!returnedState || !cookieState || returnedState !== cookieState) {
+    return new Response('invalid or missing OAuth state — restart at /auth/linkedin', { status: 400 });
+  }
   if (!code) return new Response('missing code', { status: 400 });
 
   const res = await fetch(TOKEN, {
@@ -105,8 +125,12 @@ export async function publishLinkedIn(env: Env, store: Store, draft: Draft): Pro
   });
   if (!put.ok) throw new Error(`image PUT ${put.status}: ${await put.text()}`);
 
-  // 3. Create the post.
-  const post = await fetch(`${API}/rest/posts`, {
+  // 3. Create the post. This is the one call in this function where a
+  // network-level failure (as opposed to a clean non-2xx response) is
+  // genuinely ambiguous — LinkedIn may have created the post anyway. See
+  // src/errors.ts for why this is the only mitigation available: LinkedIn's
+  // API accepts no client idempotency token.
+  const post = await fetchOrAmbiguous(`${API}/rest/posts`, {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -127,4 +151,10 @@ export async function publishLinkedIn(env: Env, store: Store, draft: Draft): Pro
 
   // The post URN comes back in a header, not the body.
   return post.headers.get('x-restli-id') ?? 'unknown';
+}
+
+function getCookie(request: Request, name: string): string | null {
+  const cookie = request.headers.get('Cookie') ?? '';
+  const match = cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`));
+  return match ? match[1] : null;
 }

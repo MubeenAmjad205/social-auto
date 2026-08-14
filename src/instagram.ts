@@ -8,6 +8,7 @@
 
 import type { Env } from './index';
 import type { Store, Draft } from './store';
+import { fetchOrAmbiguous } from './errors';
 
 const GRAPH = 'https://graph.instagram.com';
 
@@ -67,7 +68,10 @@ export async function publishInstagram(env: Env, store: Store, draft: Draft): Pr
   await waitUntilFinished(tok.access_token, creationId);
 
   // Publish. Containers expire after 24h — never split this across runs.
-  const pub = await fetch(`${GRAPH}/v23.0/${env.IG_USER_ID}/media_publish`, {
+  // Unlike container creation above, a network-level failure HERE is
+  // genuinely ambiguous: this is the call that makes the post live. See
+  // src/errors.ts.
+  const pub = await fetchOrAmbiguous(`${GRAPH}/v23.0/${env.IG_USER_ID}/media_publish`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ creation_id: creationId, access_token: tok.access_token }),

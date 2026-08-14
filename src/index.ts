@@ -11,7 +11,8 @@ import { generateDraft } from './generate';
 import { generateInstagramDraft } from './instagram-generate';
 import { publishLinkedIn, startLinkedInAuth, handleLinkedInCallback } from './linkedin';
 import { publishInstagram, refreshInstagramToken } from './instagram';
-import { notify, handleTelegramWebhook } from './telegram';
+import { notify, notifyPublished, handleTelegramWebhook } from './telegram';
+import { AmbiguousPublishError } from './errors';
 
 export interface Env {
   AI: Ai;
@@ -66,16 +67,24 @@ export default {
 
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    try {
+      if (url.pathname === '/auth/linkedin') return startLinkedInAuth(env);
+      if (url.pathname === '/auth/linkedin/callback') return await handleLinkedInCallback(request, env);
 
-    if (url.pathname === '/auth/linkedin') return startLinkedInAuth(env);
-    if (url.pathname === '/auth/linkedin/callback') return handleLinkedInCallback(request, env);
+      // The unguessable path segment is the shared secret with Telegram.
+      if (url.pathname === `/tg/${env.WEBHOOK_SECRET}` && request.method === 'POST') {
+        return await handleTelegramWebhook(request, env);
+      }
 
-    // The unguessable path segment is the shared secret with Telegram.
-    if (url.pathname === `/tg/${env.WEBHOOK_SECRET}` && request.method === 'POST') {
-      return handleTelegramWebhook(request, env);
+      return new Response('not found', { status: 404 });
+    } catch (err: any) {
+      // scheduled() has this exact wrapper for crons; fetch() routes are just
+      // as capable of failing silently otherwise — the Telegram webhook IS
+      // the monitoring channel, so a bug in it deserves an alert too, not a
+      // bare 500 nobody sees.
+      await notify(env, `🔴 HTTP \`${url.pathname}\` failed\n\n${err?.message ?? err}`).catch(() => {});
+      return new Response('internal error', { status: 500 });
     }
-
-    return new Response('not found', { status: 404 });
   },
 };
 
@@ -103,9 +112,26 @@ async function publishDue(env: Env, store: Store, ctx: ExecutionContext, platfor
         editor_flags: draft.editor_flags, metrics: {},
       }));
 
-      await notify(env, `✅ published to ${platform}\n${remoteId}`);
+      await notifyPublished(env, {
+        platform, remoteId, draftId: draft._id,
+        offerStyleRef: platform === 'linkedin',
+      });
     } catch (err: any) {
       const attempts = draft.attempts + 1;
+
+      if (err instanceof AmbiguousPublishError) {
+        // The network call itself failed before any response came back —
+        // we genuinely don't know if the platform already created the post.
+        // Auto-retrying here is exactly how a duplicate happens (see
+        // src/errors.ts). Stop and make a human check first, rather than
+        // silently re-queuing for the next publish cron.
+        await store.setStatus(draft._id, 'failed', { attempts, last_error: String(err.message) });
+        await notify(env,
+          `🔴 ${platform} publish hit an AMBIGUOUS network error — it may have already posted.\n` +
+          `Check ${platform} manually before re-approving this draft.\n\n${err.message}`);
+        continue;
+      }
+
       await store.setStatus(draft._id, attempts >= 3 ? 'failed' : 'approved', {
         attempts, last_error: String(err?.message ?? err),
       });

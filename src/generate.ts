@@ -36,68 +36,74 @@ export async function generateDraft(env: Env, store: Store, ctx: ExecutionContex
     return;
   }
 
-  // 1. RESEARCH
-  let t = Date.now();
-  let facts: Fact[] = [];
+  // nextSeed() above already claimed this seed (set used_at) atomically. If
+  // anything below fails, give it back rather than burning it on a failure
+  // that produced nothing — same principle as returning it on 🗑 Reject.
   try {
-    facts = await research(env, store, seed);
-  } catch (err: any) {
-    // Retrieval failure is not fatal — it degrades to a seed-only post,
-    // which is often the better post anyway.
-    await notify(env, `⚠️ research failed, falling back to seed-only: ${err?.message ?? err}`);
+    // 1. RESEARCH
+    let t = Date.now();
+    let facts: Fact[] = [];
+    try {
+      facts = await research(env, store, seed);
+    } catch (err: any) {
+      // Retrieval failure is not fatal — it degrades to a seed-only post,
+      // which is often the better post anyway.
+      await notify(env, `⚠️ research failed, falling back to seed-only: ${err?.message ?? err}`);
+    }
+    steps.push({ name: 'research', ms: Date.now() - t, facts_found: facts.length });
+
+    // 2. WRITE
+    t = Date.now();
+    const body = await write(env, seed, facts);
+    steps.push({ name: 'write', ms: Date.now() - t, neurons_est: 14 });
+
+    // 3. ART DIRECTION
+    const imagePrompt = await artDirect(env, body);
+
+    // 4. IMAGE — every post gets one. Mandatory on Instagram, materially
+    //    better reach on LinkedIn.
+    t = Date.now();
+    const imageKey = await renderImage(env, store, imagePrompt);
+    steps.push({ name: 'image', ms: Date.now() - t, neurons_est: 104, model: env.IMAGE_MODEL });
+
+    // 5. EDIT — annotate, never rewrite.
+    const flags = edit(body, facts, seed);
+
+    const id = await store.createDraft({
+      platform: 'linkedin',
+      status: 'pending',
+      body,
+      image_key: imageKey,
+      image_keys: null,
+      image_prompt: imagePrompt,
+      seed,
+      facts,
+      editor_flags: flags,
+      attempts: 0,
+      last_error: null,
+      remote_id: null,
+      idempotency_key: `li-${crypto.randomUUID()}`,
+    });
+
+    await sendDraftForApproval(env, {
+      id,
+      platform: 'linkedin',
+      body,
+      flags,
+      sourceCount: facts.length,
+      imageUrl: `${env.PUBLIC_R2_BASE}/${imageKey}`,
+    });
+
+    ctx.waitUntil(store.logRun({
+      cron: '0 2 * * *', started_at: new Date(started),
+      duration_ms: Date.now() - started, ok: true, steps,
+      neurons_total_est: steps.reduce((n, s) => n + (s.neurons_est ?? 0), 0),
+      error: null,
+    }));
+  } catch (err) {
+    await store.returnSeed(seed._id);
+    throw err; // still reported to Telegram by the scheduled() wrapper in index.ts
   }
-  steps.push({ name: 'research', ms: Date.now() - t, facts_found: facts.length });
-
-  // 2. WRITE
-  t = Date.now();
-  const body = await write(env, seed, facts);
-  steps.push({ name: 'write', ms: Date.now() - t, neurons_est: 14 });
-
-  // 3. ART DIRECTION
-  const imagePrompt = await artDirect(env, body);
-
-  // 4. IMAGE — every post gets one. Mandatory on Instagram, materially
-  //    better reach on LinkedIn.
-  t = Date.now();
-  const imageKey = await renderImage(env, store, imagePrompt);
-  steps.push({ name: 'image', ms: Date.now() - t, neurons_est: 104, model: env.IMAGE_MODEL });
-
-  // 5. EDIT — annotate, never rewrite.
-  const flags = edit(body, facts, seed);
-
-  const id = await store.createDraft({
-    platform: 'linkedin',
-    status: 'pending',
-    body,
-    image_key: imageKey,
-    image_keys: null,
-    image_prompt: imagePrompt,
-    seed,
-    facts,
-    editor_flags: flags,
-    attempts: 0,
-    last_error: null,
-    remote_id: null,
-    idempotency_key: `li-${crypto.randomUUID()}`,
-  });
-
-  await store.markSeedUsed(seed._id);
-
-  await sendDraftForApproval(env, {
-    id,
-    platform: 'linkedin',
-    body,
-    flags,
-    sourceCount: facts.length,
-    imageUrl: `${env.PUBLIC_R2_BASE}/${imageKey}`,
-  });
-
-  ctx.waitUntil(store.logRun({
-    cron: '0 2 * * *', started_at: new Date(started),
-    duration_ms: Date.now() - started, ok: true, steps,
-    neurons_total_est: steps.reduce((n, s) => n + (s.neurons_est ?? 0), 0),
-    error: null,
-  }));
 }
 
 // ----------------------------------------------------------------- WRITER

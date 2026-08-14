@@ -69,15 +69,21 @@ export interface Store {
   getDraft(id: string): Promise<Draft | null>;
   setStatus(id: string, s: Status, patch?: Partial<Draft>): Promise<void>;
   dueFor(p: Platform, limit: number): Promise<Draft[]>;
+  listActive(limit: number): Promise<Draft[]>;
 
+  // Claiming a seed and marking it used are the same atomic operation — see
+  // the comment on MongoStore.nextSeed. returnSeed undoes that claim when
+  // the draft it produced didn't survive (rejected, or generation failed).
   nextSeed(preferKind?: SeedKind): Promise<Seed | null>;
+  returnSeed(id: string): Promise<void>;
   addSeed(note: string, kind: SeedKind, angle?: string): Promise<void>;
-  markSeedUsed(id: string): Promise<void>;
   seedCount(): Promise<number>;
 
   activeStyleRefs(): Promise<string[]>;
+  addStyleRef(imageKey: string): Promise<void>;
 
   logRun(r: unknown): Promise<void>;
+  lastRun(): Promise<any | null>;
   recordPost(p: unknown): Promise<void>;
   seenSource(url: string): Promise<boolean>;
   markSourceSeen(s: { url: string; title: string; source_name: string }): Promise<void>;
@@ -188,23 +194,52 @@ export class MongoStore implements Store {
       .toArray() as unknown as Promise<Draft[]>;
   }
 
+  async listActive(limit: number): Promise<Draft[]> {
+    const db = await this.conn();
+    return db.collection('drafts')
+      .find({ status: { $in: ['pending', 'approved'] } })
+      .sort({ created_at: -1 })
+      .limit(limit)
+      .toArray() as unknown as Promise<Draft[]>;
+  }
+
   // -------------------------------------------------------------- seeds
 
   /**
+   * Claim-and-use in one atomic findOneAndUpdate, not a separate read then a
+   * later markSeedUsed(). Two reasons: (1) a read-then-write-later gap left a
+   * window where two overlapping invocations could select the same unused
+   * seed; (2) it lets returnSeed() below be the single, symmetric way a seed
+   * goes back in the pool — on a rejected draft or a failed generation —
+   * rather than tracking used/claimed as two different states.
+   *
    * Roughly 2:1 own-work to client-work, per docs/03. Try the preferred kind
    * first, fall back to anything rather than skipping a day.
    */
   async nextSeed(preferKind?: SeedKind): Promise<Seed | null> {
     const db = await this.conn();
-    const find = (q: object) =>
-      db.collection('seeds').findOne(q as any, { sort: { created_at: 1 } });
+    const claim = (q: object) =>
+      db.collection('seeds').findOneAndUpdate(
+        q as any,
+        { $set: { used_at: new Date() } },
+        { sort: { created_at: 1 }, returnDocument: 'before' }
+      );
 
     const doc =
-      (preferKind && (await find({ used_at: null, kind: preferKind }))) ||
-      (await find({ used_at: null }));
+      (preferKind && (await claim({ used_at: null, kind: preferKind }))) ||
+      (await claim({ used_at: null }));
 
     if (!doc) return null;
     return { _id: String(doc._id), note: doc.note, angle: doc.angle, kind: doc.kind };
+  }
+
+  async returnSeed(id: string): Promise<void> {
+    const db = await this.conn();
+    const { ObjectId } = await import('mongodb');
+    await db.collection('seeds').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { used_at: null } }
+    );
   }
 
   async addSeed(note: string, kind: SeedKind, angle?: string): Promise<void> {
@@ -212,15 +247,6 @@ export class MongoStore implements Store {
     await db.collection('seeds').insertOne({
       note, kind, angle: angle ?? null, used_at: null, created_at: new Date(),
     });
-  }
-
-  async markSeedUsed(id: string): Promise<void> {
-    const db = await this.conn();
-    const { ObjectId } = await import('mongodb');
-    await db.collection('seeds').updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { used_at: new Date() } }
-    );
   }
 
   async seedCount(): Promise<number> {
@@ -237,6 +263,24 @@ export class MongoStore implements Store {
     return docs.map(d => d.image_key);
   }
 
+  /**
+   * Max 3 active per docs/05 — FLUX.2 klein accepts up to 4 reference images
+   * but 3 keeps one slot of headroom. Adding a 4th deactivates the oldest
+   * rather than rejecting the call, so this is safe to expose as a one-tap
+   * Telegram action without a separate "which one to drop" decision.
+   */
+  async addStyleRef(imageKey: string): Promise<void> {
+    const db = await this.conn();
+    await db.collection('style_refs').insertOne({ image_key: imageKey, active: true, created_at: new Date() });
+
+    const active = await db.collection('style_refs')
+      .find({ active: true }).sort({ created_at: 1 }).toArray();
+    if (active.length > 3) {
+      const toRetire = active.slice(0, active.length - 3).map(d => d._id);
+      await db.collection('style_refs').updateMany({ _id: { $in: toRetire } }, { $set: { active: false } });
+    }
+  }
+
   // ------------------------------------------------------------ archive
   // Always invoked via ctx.waitUntil(). Never awaited on the critical path —
   // a logging failure must not take down a publish.
@@ -244,6 +288,11 @@ export class MongoStore implements Store {
   async logRun(r: unknown): Promise<void> {
     const db = await this.conn();
     await db.collection('runs').insertOne(r as any);
+  }
+
+  async lastRun(): Promise<any | null> {
+    const db = await this.conn();
+    return db.collection('runs').findOne({}, { sort: { started_at: -1 } });
   }
 
   async recordPost(p: unknown): Promise<void> {

@@ -9,11 +9,11 @@
  * empty facts[] still falls back to a seed-only carousel.
  *
  * NOTE ON SEED CONSUMPTION: this draws from the same `seeds` collection as
- * src/generate.ts via store.nextSeed()/markSeedUsed(). Running both
- * pipelines drains the queue roughly twice as fast as LinkedIn alone — see
- * docs/04's "empty seed queue is the real failure mode" warning. Bank more
- * than the documented 5-10 if you run both platforms, or the two pipelines
- * will starve each other.
+ * src/generate.ts via store.nextSeed(), which atomically claims a seed on
+ * read. Running both pipelines drains the queue roughly twice as fast as
+ * LinkedIn alone — see docs/04's "empty seed queue is the real failure mode"
+ * warning. Bank more than the documented 5-10 if you run both platforms, or
+ * the two pipelines will starve each other.
  */
 
 import type { Env } from './index';
@@ -41,60 +41,65 @@ export async function generateInstagramDraft(env: Env, store: Store, ctx: Execut
     return;
   }
 
-  let t = Date.now();
-  let facts: Fact[] = [];
+  // nextSeed() above already claimed this seed (set used_at) atomically. If
+  // anything below fails, give it back rather than burning it for nothing.
   try {
-    facts = await research(env, store, seed);
-  } catch (err: any) {
-    await notify(env, `⚠️ IG research failed, falling back to seed-only: ${err?.message ?? err}`);
+    let t = Date.now();
+    let facts: Fact[] = [];
+    try {
+      facts = await research(env, store, seed);
+    } catch (err: any) {
+      await notify(env, `⚠️ IG research failed, falling back to seed-only: ${err?.message ?? err}`);
+    }
+    steps.push({ name: 'research', ms: Date.now() - t, facts_found: facts.length });
+
+    t = Date.now();
+    const slides = await writeCarousel(env, seed, facts);
+    steps.push({ name: 'write', ms: Date.now() - t, neurons_est: 20 });
+
+    t = Date.now();
+    const imageKeys = await renderAndUploadCarousel(env, slides);
+    steps.push({ name: 'render', ms: Date.now() - t, slides: imageKeys.length });
+
+    const caption = buildCaption(seed, facts);
+    const flags = editCarousel(slides, caption, facts, seed);
+
+    const id = await store.createDraft({
+      platform: 'instagram',
+      status: 'pending',
+      body: caption,
+      image_key: imageKeys[0] ?? null,
+      image_keys: imageKeys,
+      // Slides, not a prompt string — this is what the 🎲 redraw path re-reads
+      // to regenerate the same carousel content with fresh renders.
+      image_prompt: JSON.stringify(slides),
+      seed,
+      facts,
+      editor_flags: flags,
+      attempts: 0,
+      last_error: null,
+      remote_id: null,
+      idempotency_key: `ig-${crypto.randomUUID()}`,
+    } as Omit<Draft, '_id' | 'created_at' | 'published_at'>);
+
+    await sendCarouselForApproval(env, {
+      id,
+      body: caption,
+      flags,
+      sourceCount: facts.length,
+      imageUrls: imageKeys.map(k => `${env.PUBLIC_R2_BASE}/${k}`),
+    });
+
+    ctx.waitUntil(store.logRun({
+      cron: '0 6 * * *', started_at: new Date(started),
+      duration_ms: Date.now() - started, ok: true, steps,
+      neurons_total_est: steps.reduce((n, s) => n + (s.neurons_est ?? 0), 0),
+      error: null,
+    }));
+  } catch (err) {
+    await store.returnSeed(seed._id);
+    throw err;
   }
-  steps.push({ name: 'research', ms: Date.now() - t, facts_found: facts.length });
-
-  t = Date.now();
-  const slides = await writeCarousel(env, seed, facts);
-  steps.push({ name: 'write', ms: Date.now() - t, neurons_est: 20 });
-
-  t = Date.now();
-  const imageKeys = await renderAndUploadCarousel(env, slides);
-  steps.push({ name: 'render', ms: Date.now() - t, slides: imageKeys.length });
-
-  const caption = buildCaption(seed, facts);
-  const flags = editCarousel(slides, caption, facts, seed);
-
-  const id = await store.createDraft({
-    platform: 'instagram',
-    status: 'pending',
-    body: caption,
-    image_key: imageKeys[0] ?? null,
-    image_keys: imageKeys,
-    // Slides, not a prompt string — this is what the 🎲 redraw path re-reads
-    // to regenerate the same carousel content with fresh renders.
-    image_prompt: JSON.stringify(slides),
-    seed,
-    facts,
-    editor_flags: flags,
-    attempts: 0,
-    last_error: null,
-    remote_id: null,
-    idempotency_key: `ig-${crypto.randomUUID()}`,
-  } as Omit<Draft, '_id' | 'created_at' | 'published_at'>);
-
-  await store.markSeedUsed(seed._id);
-
-  await sendCarouselForApproval(env, {
-    id,
-    body: caption,
-    flags,
-    sourceCount: facts.length,
-    imageUrls: imageKeys.map(k => `${env.PUBLIC_R2_BASE}/${k}`),
-  });
-
-  ctx.waitUntil(store.logRun({
-    cron: '0 6 * * *', started_at: new Date(started),
-    duration_ms: Date.now() - started, ok: true, steps,
-    neurons_total_est: steps.reduce((n, s) => n + (s.neurons_est ?? 0), 0),
-    error: null,
-  }));
 }
 
 // ----------------------------------------------------------------- WRITER
