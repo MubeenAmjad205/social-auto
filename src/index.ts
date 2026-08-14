@@ -11,7 +11,7 @@ import { generateDraft } from './generate';
 import { generateInstagramDraft } from './instagram-generate';
 import { publishLinkedIn, startLinkedInAuth, handleLinkedInCallback } from './linkedin';
 import { publishInstagram, refreshInstagramToken, startInstagramAuth, handleInstagramCallback } from './instagram';
-import { notify, notifyPublished, handleTelegramWebhook } from './telegram';
+import { notify, notifyPublished, notifyAmbiguousFailure, handleTelegramWebhook } from './telegram';
 import { AmbiguousPublishError } from './errors';
 
 export interface Env {
@@ -24,6 +24,7 @@ export interface Env {
   INSTAGRAM_REDIRECT_URI: string;
   IMAGE_MODEL: string;
   TEXT_MODEL: string;
+  IMAGE_PROVIDER: string; // "workers-ai" (default) | "pollinations" | "gemini" — see src/image-providers.ts
   MONGODB_DB: string;
 
   MONGODB_URI: string;
@@ -32,6 +33,7 @@ export interface Env {
   LINKEDIN_CLIENT_SECRET: string;
   INSTAGRAM_CLIENT_ID: string;
   INSTAGRAM_CLIENT_SECRET: string;
+  GEMINI_API_KEY: string; // optional — only required when IMAGE_PROVIDER=gemini
   GITHUB_PAT: string;
   TAVILY_API_KEY: string;
   TELEGRAM_BOT_TOKEN: string;
@@ -130,9 +132,7 @@ async function publishDue(env: Env, store: Store, ctx: ExecutionContext, platfor
         // src/errors.ts). Stop and make a human check first, rather than
         // silently re-queuing for the next publish cron.
         await store.setStatus(draft._id, 'failed', { attempts, last_error: String(err.message) });
-        await notify(env,
-          `🔴 ${platform} publish hit an AMBIGUOUS network error — it may have already posted.\n` +
-          `Check ${platform} manually before re-approving this draft.\n\n${err.message}`);
+        await notifyAmbiguousFailure(env, { platform, draftId: draft._id, message: String(err.message) });
         continue;
       }
 

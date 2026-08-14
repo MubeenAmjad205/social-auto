@@ -23,6 +23,8 @@
  * negligible — unlike the base64 image decode in generate.ts.
  */
 
+import { b64ToBytes, bytesToB64 } from './util';
+
 export interface Sealed {
   ct: string; // base64 ciphertext
   iv: string; // base64 nonce, 12 bytes, unique per write
@@ -63,23 +65,6 @@ export async function open(sealed: Sealed, tokenKeyB64: string): Promise<string>
     b64ToBytes(sealed.ct)
   );
   return new TextDecoder().decode(pt);
-}
-
-function b64ToBytes(b64: string): Uint8Array {
-  const anyU8 = Uint8Array as any;
-  if (typeof anyU8.fromBase64 === 'function') return anyU8.fromBase64(b64);
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-function bytesToB64(bytes: Uint8Array): string {
-  const anyBytes = bytes as any;
-  if (typeof anyBytes.toBase64 === 'function') return anyBytes.toBase64();
-  let s = '';
-  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
-  return btoa(s);
 }
 
 /**

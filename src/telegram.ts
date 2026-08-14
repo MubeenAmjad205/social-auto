@@ -49,6 +49,34 @@ export async function notifyPublished(
 }
 
 /**
+ * A network failure with no response is genuinely ambiguous (see
+ * src/errors.ts) — the draft goes to 'failed' without auto-retrying, and
+ * this message is how you get it moving again after checking the platform
+ * yourself. Without this button, un-stuck-ing it meant editing Atlas by
+ * hand, which is exactly the "Telegram is the entire interface" principle
+ * this button restores.
+ */
+export async function notifyAmbiguousFailure(
+  env: Env,
+  d: { platform: string; draftId: string; message: string }
+) {
+  await fetch(api(env, 'sendMessage'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: env.TELEGRAM_CHAT_ID,
+      text: `🔴 ${d.platform} publish hit an AMBIGUOUS network error — it may have already posted.\n` +
+            `Check ${d.platform} manually first.\n\n${d.message}`,
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '🔁 Confirmed not posted — retry', callback_data: `retry:${d.draftId}` },
+        ]],
+      },
+    }),
+  });
+}
+
+/**
  * Shared by the single-image (LinkedIn) and carousel (Instagram) approval
  * flows. Sent as its own sendMessage rather than folded into a photo caption
  * — Telegram caps photo captions at 1024 chars, and a post near the docs'
@@ -130,9 +158,17 @@ export async function sendCarouselForApproval(
  * leaked bot username, or the bot ever being added to a group, would let
  * anyone approve or reject drafts under your name. This is the actual
  * authorization check; the URL secret is only obscurity on top of it.
+ *
+ * Checks `callback_query.from.id` (who pressed the button) before falling
+ * back to `callback_query.message.chat.id` — `message` is documented by
+ * Telegram as optional on a callback_query (absent for old/inaccessible
+ * messages), while `from` is always present. Checking `message.chat.id`
+ * only would incorrectly reject a legitimate tap on a stale message.
  */
 function isAuthorized(update: any, env: Env): boolean {
-  const chatId = update.callback_query?.message?.chat?.id ?? update.message?.chat?.id;
+  const chatId = update.callback_query?.from?.id
+    ?? update.callback_query?.message?.chat?.id
+    ?? update.message?.chat?.id;
   return chatId != null && String(chatId) === String(env.TELEGRAM_CHAT_ID);
 }
 
@@ -160,14 +196,41 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
     if (update.callback_query) {
       const cb = update.callback_query;
       const [action, draftId] = String(cb.data).split(':');
+      const draft = await store.getDraft(draftId);
+      let responseText: string = action;
 
-      if (action === 'redraw') {
+      // styleref and retry have their own validity rules (checked below);
+      // everything else — ok/redraw/no — only makes sense while a draft is
+      // still 'pending'. Without this guard, a stale button on an old
+      // Telegram message (the operator taps Approve on a draft that a LATER
+      // tap already published, rejected, or that a cron already failed)
+      // would silently re-mutate a draft that's already been resolved — an
+      // Approve on an already-published draft gets picked up as duplicate
+      // work by the very next publish cron. This is the guard against that.
+      if (action === 'styleref') {
+        if (draft?.image_key) {
+          await store.addStyleRef(draft.image_key);
+          responseText = 'Saved as style ref';
+        } else {
+          responseText = 'Nothing to save — image missing';
+        }
+      } else if (action === 'retry') {
+        if (draft?.status === 'failed') {
+          await store.setStatus(draftId, 'approved');
+          responseText = 'Requeued for the next publish run';
+        } else {
+          responseText = draft ? `Draft is ${draft.status}, not failed — nothing to retry` : 'Draft not found';
+        }
+      } else if (!draft) {
+        responseText = 'Draft not found — may have been cleaned up';
+      } else if (draft.status !== 'pending') {
+        responseText = `Already ${draft.status} — ignoring stale button`;
+      } else if (action === 'redraw') {
         // Regenerating is cheap: ~104 neurons of a 10,000/day allowance.
         // You can reject an image ninety times a day and pay nothing.
         // Regenerate and resend immediately rather than nulling image_key
         // and waiting for a future run to notice — nothing else ever would.
-        const draft = await store.getDraft(draftId);
-        if (draft?.platform === 'instagram' && draft.image_keys) {
+        if (draft.platform === 'instagram' && draft.image_keys) {
           const slides = JSON.parse(draft.image_prompt);
           const imageKeys = await renderAndUploadCarousel(env, slides);
           await store.setStatus(draftId, draft.status, { image_key: imageKeys[0] ?? null, image_keys: imageKeys });
@@ -178,7 +241,7 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
             sourceCount: draft.facts.length,
             imageUrls: imageKeys.map(k => `${env.PUBLIC_R2_BASE}/${k}`),
           });
-        } else if (draft) {
+        } else {
           const imageKey = await renderImage(env, store, draft.image_prompt);
           await store.setStatus(draftId, draft.status, { image_key: imageKey });
           await sendDraftForApproval(env, {
@@ -190,31 +253,23 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
             imageUrl: `${env.PUBLIC_R2_BASE}/${imageKey}`,
           });
         }
-      } else if (action === 'styleref') {
-        const draft = await store.getDraft(draftId);
-        if (draft?.image_key) await store.addStyleRef(draft.image_key);
+        responseText = 'New image sent';
       } else if (action === 'no') {
-        const draft = await store.getDraft(draftId);
         await store.setStatus(draftId, 'rejected');
         // A rejected ANGLE doesn't mean the underlying material was bad —
         // give the seed back rather than burning it permanently. See
         // src/store.ts's nextSeed/returnSeed for the other half of this.
-        if (draft) await store.returnSeed(draft.seed._id);
-      } else {
+        await store.returnSeed(draft.seed._id);
+        responseText = 'Rejected — seed returned to the queue';
+      } else if (action === 'ok') {
         await store.setStatus(draftId, 'approved');
+        responseText = 'Queued for the next publish run';
       }
 
       await fetch(api(env, 'answerCallbackQuery'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          callback_query_id: cb.id,
-          text: action === 'ok' ? 'Queued for the next publish run'
-              : action === 'redraw' ? 'New image sent'
-              : action === 'styleref' ? 'Saved as style ref'
-              : action === 'no' ? 'Rejected — seed returned to the queue'
-              : action,
-        }),
+        body: JSON.stringify({ callback_query_id: cb.id, text: responseText }),
       });
       return new Response('ok');
     }

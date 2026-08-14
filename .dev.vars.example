@@ -27,6 +27,11 @@ LINKEDIN_CLIENT_SECRET=
 INSTAGRAM_CLIENT_ID=
 INSTAGRAM_CLIENT_SECRET=
 
+# OPTIONAL — only needed if IMAGE_PROVIDER is set to "gemini" in
+# wrangler.jsonc (default is "workers-ai", which needs none of this).
+# Free, no card: aistudio.google.com/apikey. See src/image-providers.ts.
+GEMINI_API_KEY=
+
 # GitHub personal access token — raises search API limit 60/hr -> 5,000/hr.
 # No scopes needed, it's only used for public repo search.
 GITHUB_PAT=
