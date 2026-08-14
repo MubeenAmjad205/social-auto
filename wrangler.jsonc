@@ -63,6 +63,15 @@
     "IMAGE_MODEL": "@cf/black-forest-labs/flux-2-klein-4b",
     "TEXT_MODEL": "@cf/openai/gpt-oss-20b",
 
+    // Optional swap for the LinkedIn post image — see src/image-providers.ts.
+    // "workers-ai" (default): FLUX.2 above, costs Workers AI neurons, supports
+    //   style_refs for visual consistency across posts.
+    // "pollinations": free, no API key at all, but no style_refs and may
+    //   carry a small watermark on anonymous requests.
+    // "gemini": free (~500 images/day), needs a GEMINI_API_KEY secret, no
+    //   style_refs, generally higher quality than FLUX schnell/klein.
+    "IMAGE_PROVIDER": "workers-ai",
+
     "MONGODB_DB": "social"
   }
 
@@ -77,6 +86,8 @@
   //                          visiting /auth/instagram now captures the IG business user
   //                          id automatically and stores it on the token document.
   //   INSTAGRAM_CLIENT_SECRET
+  //   GEMINI_API_KEY         OPTIONAL — only needed if IMAGE_PROVIDER is set to "gemini"
+  //                          above. Free, no card: aistudio.google.com/apikey
   //   GITHUB_PAT
   //   TAVILY_API_KEY
   //   TELEGRAM_BOT_TOKEN

@@ -12,6 +12,8 @@ import type { Env } from './index';
 import type { Fact, Seed, Store } from './store';
 import { research } from './research';
 import { sendDraftForApproval, notify } from './telegram';
+import { resolveProvider, generateImageBytes } from './image-providers';
+import { b64ToBytes } from './util';
 
 export const BANNED = [
   'delve', 'tapestry', 'navigate the', 'leverage', 'testament to',
@@ -64,7 +66,15 @@ export async function generateDraft(env: Env, store: Store, ctx: ExecutionContex
     //    better reach on LinkedIn.
     t = Date.now();
     const imageKey = await renderImage(env, store, imagePrompt);
-    steps.push({ name: 'image', ms: Date.now() - t, neurons_est: 104, model: env.IMAGE_MODEL });
+    // Neuron cost and model name only apply to the workers-ai path — logging
+    // them unconditionally would misreport spend once IMAGE_PROVIDER is set
+    // to a free alternative that costs zero Workers AI neurons.
+    const provider = resolveProvider(env);
+    steps.push({
+      name: 'image', ms: Date.now() - t,
+      neurons_est: provider === 'workers-ai' ? 104 : 0,
+      model: provider === 'workers-ai' ? env.IMAGE_MODEL : provider,
+    });
 
     // 5. EDIT — annotate, never rewrite.
     const flags = edit(body, facts, seed);
@@ -183,52 +193,59 @@ async function artDirect(env: Env, post: string): Promise<string> {
  * FLUX.2 takes MULTIPART FORM DATA even for a text-only prompt, and `steps` is
  * fixed at 4 (distilled). This differs from flux-1-schnell, which takes plain
  * JSON. Swapping models blind will break here first.
+ *
+ * IMAGE_PROVIDER (wrangler.jsonc, default "workers-ai") can swap this whole
+ * backend for a free alternative — see src/image-providers.ts for what's
+ * available and the trade-offs (namely: losing style_refs consistency).
  */
 export async function renderImage(env: Env, store: Store, prompt: string): Promise<string> {
-  const form = new FormData();
-  form.append('prompt', prompt);
-  form.append('width', '1024');
-  form.append('height', '1024');
+  const provider = resolveProvider(env);
 
-  // Style references: up to 4 previously-approved images, each under 512x512.
-  // This is what makes the feed look like one designer made it. Almost nobody
-  // uses this, and it matters more than model quality.
-  for (const [i, key] of (await store.activeStyleRefs()).entries()) {
-    const obj = await env.MEDIA.get(key);
-    if (obj) form.append(`input_image_${i}`, await obj.blob());
+  let bytes: Uint8Array;
+  let contentType = 'image/jpeg';
+
+  if (provider === 'workers-ai') {
+    const form = new FormData();
+    form.append('prompt', prompt);
+    form.append('width', '1024');
+    form.append('height', '1024');
+
+    // Style references: up to 4 previously-approved images, each under 512x512.
+    // This is what makes the feed look like one designer made it. Almost nobody
+    // uses this, and it matters more than model quality. Only Workers AI's
+    // FLUX.2 supports it — the alternative providers don't wire this up.
+    for (const [i, key] of (await store.activeStyleRefs()).entries()) {
+      const obj = await env.MEDIA.get(key);
+      if (obj) form.append(`input_image_${i}`, await obj.blob());
+    }
+
+    // FormData won't expose its boundary. Wrapping it in a Response serializes
+    // it and generates the Content-Type header the model requires.
+    const serialized = new Response(form);
+
+    const res: any = await env.AI.run(env.IMAGE_MODEL as any, {
+      multipart: {
+        body: serialized.body,
+        contentType: serialized.headers.get('content-type'),
+      },
+    });
+
+    // Workers AI image models return a BASE64 STRING, not a stream. The decode
+    // is unavoidable and is the main CPU cost in the pipeline, against a 10ms
+    // budget now also carrying the Atlas TLS handshake.
+    // If you hit "Exceeded CPU limit": drop to 768x768, then move this function
+    // into its own Worker behind a service binding for a fresh budget.
+    bytes = b64ToBytes(res.image ?? res);
+  } else {
+    const img = await generateImageBytes(env, provider, prompt);
+    bytes = img.bytes;
+    contentType = img.contentType;
   }
 
-  // FormData won't expose its boundary. Wrapping it in a Response serializes
-  // it and generates the Content-Type header the model requires.
-  const serialized = new Response(form);
-
-  const res: any = await env.AI.run(env.IMAGE_MODEL as any, {
-    multipart: {
-      body: serialized.body,
-      contentType: serialized.headers.get('content-type'),
-    },
-  });
-
-  // Workers AI image models return a BASE64 STRING, not a stream. The decode
-  // is unavoidable and is the main CPU cost in the pipeline, against a 10ms
-  // budget now also carrying the Atlas TLS handshake.
-  // If you hit "Exceeded CPU limit": drop to 768x768, then move this function
-  // into its own Worker behind a service binding for a fresh budget.
-  const bytes = b64ToBytes(res.image ?? res);
-
-  const key = `img/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}.jpg`;
-  await env.MEDIA.put(key, bytes, { httpMetadata: { contentType: 'image/jpeg' } });
+  const ext = contentType === 'image/png' ? 'png' : 'jpg';
+  const key = `img/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}.${ext}`;
+  await env.MEDIA.put(key, bytes, { httpMetadata: { contentType } });
   return key;
-}
-
-function b64ToBytes(b64: string): Uint8Array {
-  // Runtime-native where available — a fraction of the CPU of the atob loop.
-  const anyU8 = Uint8Array as any;
-  if (typeof anyU8.fromBase64 === 'function') return anyU8.fromBase64(b64);
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
 }
 
 // ----------------------------------------------------------------- EDITOR

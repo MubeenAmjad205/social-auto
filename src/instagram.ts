@@ -59,6 +59,12 @@ export async function handleInstagramCallback(request: Request, env: Env): Promi
 
   // 1. Short-lived token (~1hr). Instagram sometimes appends "#_" to the
   // returned code — strip it, a well-known trap in this exact exchange.
+  //
+  // UNVERIFIED, flagged rather than hidden: Meta's own curl examples for
+  // this endpoint use `-F` (multipart/form-data), but application/x-www-
+  // form-urlencoded (what URLSearchParams sends automatically) is widely
+  // reported to work too. If this 400s in practice, the fix is switching
+  // `tokenForm` to a FormData and dropping the explicit header below.
   const tokenForm = new URLSearchParams({
     client_id: env.INSTAGRAM_CLIENT_ID,
     client_secret: env.INSTAGRAM_CLIENT_SECRET,
@@ -66,7 +72,11 @@ export async function handleInstagramCallback(request: Request, env: Env): Promi
     redirect_uri: env.INSTAGRAM_REDIRECT_URI,
     code: code.replace(/#_$/, ''),
   });
-  const shortRes = await fetch(IG_TOKEN, { method: 'POST', body: tokenForm });
+  const shortRes = await fetch(IG_TOKEN, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: tokenForm,
+  });
   if (!shortRes.ok) return new Response(`token exchange failed: ${await shortRes.text()}`, { status: 502 });
   const short = await shortRes.json<{ access_token: string; user_id: number }>();
 
@@ -200,6 +210,15 @@ async function createSingleContainer(env: Env, igUserId: string, accessToken: st
 async function createCarouselContainer(env: Env, igUserId: string, accessToken: string, draft: Draft): Promise<string> {
   // 1. One child container per slide, marked is_carousel_item. These must
   //    each reach FINISHED before they can be referenced by the parent.
+  //
+  // Creation is sequential (cheap — each call just registers a container and
+  // returns an id) but polling is done in PARALLEL, not one child at a time.
+  // Cron Triggers get 15 minutes of wall time; waitUntilFinished's worst
+  // case is 5 x 20s = 100s per child. Sequentially, an 7-slide carousel
+  // could take up to ~12 minutes just waiting — uncomfortably close to the
+  // wall-clock limit before the parent container or the publish call even
+  // happen. Polling all children concurrently keeps the worst case at
+  // ~100s total regardless of slide count.
   const childIds: string[] = [];
   for (const key of draft.image_keys!) {
     const create = await fetch(`${GRAPH}/v23.0/${igUserId}/media`, {
@@ -213,9 +232,10 @@ async function createCarouselContainer(env: Env, igUserId: string, accessToken: 
     });
     if (!create.ok) throw new Error(`carousel child container ${create.status}: ${await create.text()}`);
     const { id } = await create.json<{ id: string }>();
-    await waitUntilFinished(accessToken, id);
     childIds.push(id);
   }
+
+  await Promise.all(childIds.map(id => waitUntilFinished(accessToken, id)));
 
   // 2. The parent container references all children and carries the caption.
   const create = await fetch(`${GRAPH}/v23.0/${igUserId}/media`, {

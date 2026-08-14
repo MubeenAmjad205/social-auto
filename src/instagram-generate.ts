@@ -174,18 +174,28 @@ function parseSlides(raw: string, seed: Seed): Slide[] {
   return fallbackCarousel(seed);
 }
 
+// Same 70-char ceiling given to the model (writeCarousel's prompt) — the
+// fallback path bypasses the LLM entirely, so nothing else enforces it here.
+// Longer headings wrap into enough lines at cover-slide font size to risk
+// colliding with the footer; see the wrap() math in src/carousel.ts.
+const FALLBACK_HEADING_MAX = 70;
+
 function fallbackCarousel(seed: Seed): Slide[] {
   return [
-    { kind: 'cover', heading: seed.angle ?? seed.note.slice(0, 90) },
+    { kind: 'cover', heading: truncate(seed.angle ?? seed.note) },
     { kind: 'point', heading: 'What happened' },
-    { kind: 'example', heading: seed.note.slice(0, 90) },
-    { kind: 'takeaway', heading: seed.angle ?? 'Worth knowing before it costs you a day' },
+    { kind: 'example', heading: truncate(seed.note) },
+    { kind: 'takeaway', heading: truncate(seed.angle ?? 'Worth knowing before it costs you a day') },
     { kind: 'cta', heading: 'Save this if you hit the same thing' },
   ];
 }
 
 function fallbackHeading(i: number, seed: Seed): string {
-  return i === 0 ? (seed.angle ?? seed.note.slice(0, 90)) : seed.note.slice(0, 90);
+  return truncate(i === 0 ? (seed.angle ?? seed.note) : seed.note);
+}
+
+function truncate(s: string): string {
+  return s.length > FALLBACK_HEADING_MAX ? s.slice(0, FALLBACK_HEADING_MAX - 1) + '…' : s;
 }
 
 // ---------------------------------------------------------------- RENDER
@@ -218,6 +228,11 @@ function editCarousel(slides: Slide[], caption: string, facts: Fact[], seed: See
   const flags: string[] = [];
   const corpus = (facts.map(f => `${f.claim} ${f.snippet}`).join(' ') + ' ' + seed.note).toLowerCase();
   const allText = (caption + ' ' + slides.map(s => `${s.heading} ${s.body ?? ''}`).join(' ')).toLowerCase();
+
+  // Instagram's hard cap — unlikely to trip given caption is built from a
+  // short seed note/angle, but LinkedIn's equivalent draft gets the same
+  // check (generate.ts's edit()) and this one was missing it.
+  if (caption.length > 2200) flags.push(`caption too long: ${caption.length}/2200 chars`);
 
   for (const b of BANNED) {
     if (allText.includes(b)) flags.push(`banned phrase: "${b}"`);
