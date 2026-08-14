@@ -1,0 +1,11 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "atlas-spike",
+  "main": "atlas-check.ts",
+  "compatibility_date": "2026-08-01",
+
+  // Required for the mongodb driver — needs node:net and node:tls.
+  "compatibility_flags": ["nodejs_compat"]
+
+  // Secret — wrangler secret put MONGODB_URI --config spike/wrangler.jsonc
+}

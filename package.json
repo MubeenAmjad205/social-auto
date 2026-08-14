@@ -1,0 +1,26 @@
+{
+  "name": "social-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Assisted LinkedIn publishing pipeline — Cloudflare Workers, MongoDB Atlas, Telegram approval",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate": "wrangler dev src/migrate.ts",
+    "spike": "wrangler dev spike/atlas-check.ts --config spike/wrangler.jsonc",
+    "spike:deploy": "wrangler deploy spike/atlas-check.ts --config spike/wrangler.jsonc",
+    "secrets:push": "wrangler secret bulk secrets.json",
+    "secrets:push:spike": "wrangler secret bulk secrets.json --config spike/wrangler.jsonc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@resvg/resvg-wasm": "^2.6.2",
+    "mongodb": "^7.5.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260814.1",
+    "@types/node": "^26.2.0",
+    "typescript": "^5.9.0",
+    "wrangler": "^4.123.0"
+  }
+}

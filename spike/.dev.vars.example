@@ -1,0 +1,4 @@
+# Local dev secret for the atlas-check spike. Copy to spike/.dev.vars
+# (gitignored) and fill in the same MONGODB_URI you'll use in the real app.
+
+MONGODB_URI=

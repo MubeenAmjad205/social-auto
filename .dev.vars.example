@@ -1,0 +1,41 @@
+# Local dev secrets for `wrangler dev`. Copy this file to `.dev.vars`
+# (gitignored) and fill in real values as you get them.
+#
+# These are SECRETS -> in production they go via `wrangler secret put` (or
+# `wrangler secret bulk secrets.json`, see secrets.example.json), never in
+# wrangler.jsonc. Non-secret vars (PUBLIC_R2_BASE, LINKEDIN_VERSION,
+# LINKEDIN_REDIRECT_URI, IMAGE_MODEL, TEXT_MODEL, MONGODB_DB) already live in
+# wrangler.jsonc's "vars" block and don't belong here.
+
+# Non-SRV multi-host string. Atlas -> Connect -> Drivers -> "Node.js 2.2.12
+# or later". mongodb+srv:// WILL NOT resolve in workerd.
+MONGODB_URI=
+
+# base64, 32 bytes. Encrypts OAuth tokens at rest (src/secrets.ts).
+# Generate: openssl rand -base64 32
+TOKEN_KEY=
+
+# From the LinkedIn developer app's Auth tab.
+LINKEDIN_CLIENT_ID=
+LINKEDIN_CLIENT_SECRET=
+
+# Instagram Professional account's numeric user id (v1.1, deferred — fill in
+# whenever you get to it).
+IG_USER_ID=
+
+# GitHub personal access token — raises search API limit 60/hr -> 5,000/hr.
+# No scopes needed, it's only used for public repo search.
+GITHUB_PAT=
+
+# https://app.tavily.com — 1,000 free credits/month, no card required.
+TAVILY_API_KEY=
+
+# From @BotFather.
+TELEGRAM_BOT_TOKEN=
+# From @userinfobot — this is YOUR chat id, so only you can approve drafts.
+TELEGRAM_CHAT_ID=
+
+# Unguessable path segment for the Telegram webhook: POST /tg/<this>.
+# Anyone holding this URL can approve/reject drafts. Generate:
+# openssl rand -hex 24
+WEBHOOK_SECRET=

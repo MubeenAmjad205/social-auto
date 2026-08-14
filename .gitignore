@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-spike/
+.wrangler/
+.env
+.dev.vars
+spike/.dev.vars
+secrets.json
+*.log
+.DS_Store
