@@ -10,7 +10,7 @@ import { MongoStore, type Store, type Platform } from './store';
 import { generateDraft } from './generate';
 import { generateInstagramDraft } from './instagram-generate';
 import { publishLinkedIn, startLinkedInAuth, handleLinkedInCallback } from './linkedin';
-import { publishInstagram, refreshInstagramToken } from './instagram';
+import { publishInstagram, refreshInstagramToken, startInstagramAuth, handleInstagramCallback } from './instagram';
 import { notify, notifyPublished, handleTelegramWebhook } from './telegram';
 import { AmbiguousPublishError } from './errors';
 
@@ -21,6 +21,7 @@ export interface Env {
   PUBLIC_R2_BASE: string;
   LINKEDIN_VERSION: string;
   LINKEDIN_REDIRECT_URI: string;
+  INSTAGRAM_REDIRECT_URI: string;
   IMAGE_MODEL: string;
   TEXT_MODEL: string;
   MONGODB_DB: string;
@@ -29,7 +30,8 @@ export interface Env {
   TOKEN_KEY: string;
   LINKEDIN_CLIENT_ID: string;
   LINKEDIN_CLIENT_SECRET: string;
-  IG_USER_ID: string;
+  INSTAGRAM_CLIENT_ID: string;
+  INSTAGRAM_CLIENT_SECRET: string;
   GITHUB_PAT: string;
   TAVILY_API_KEY: string;
   TELEGRAM_BOT_TOKEN: string;
@@ -70,6 +72,8 @@ export default {
     try {
       if (url.pathname === '/auth/linkedin') return startLinkedInAuth(env);
       if (url.pathname === '/auth/linkedin/callback') return await handleLinkedInCallback(request, env);
+      if (url.pathname === '/auth/instagram') return startInstagramAuth(env);
+      if (url.pathname === '/auth/instagram/callback') return await handleInstagramCallback(request, env);
 
       // The unguessable path segment is the shared secret with Telegram.
       if (url.pathname === `/tg/${env.WEBHOOK_SECRET}` && request.method === 'POST') {
