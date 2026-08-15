@@ -195,6 +195,22 @@ export default {
         }
       }
 
+      // Recovery for exactly the stuck-draft bug fixed above (retry not
+      // resetting attempts) — resets a specific draft back to a clean,
+      // pickup-eligible 'approved' state. Draft id, not a stage name.
+      const requeueMatch = url.pathname.match(/^\/run\/requeue\/([^/]+)\/([^/]+)$/);
+      if (requeueMatch && request.method === 'GET') {
+        const [, draftId, secret] = requeueMatch;
+        if (!timingSafeEqual(secret, env.WEBHOOK_SECRET)) return new Response('not found', { status: 404 });
+        const store = storeFor(env);
+        try {
+          await store.setStatus(draftId, 'approved', { attempts: 0, last_error: null });
+          return new Response(`ok — ${draftId} requeued with attempts reset`);
+        } finally {
+          await store.close();
+        }
+      }
+
       if (url.pathname.startsWith('/run/whoami/') && request.method === 'GET') {
         const secret = url.pathname.split('/')[3] ?? '';
         if (!timingSafeEqual(secret, env.WEBHOOK_SECRET)) return new Response('not found', { status: 404 });
