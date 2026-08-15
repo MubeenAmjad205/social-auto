@@ -18,6 +18,7 @@
  */
 
 import type { Env } from './index';
+import { extractAiText } from './util';
 
 export async function generateCaseStudy(env: Env, description: string): Promise<string> {
   const system = [
@@ -51,5 +52,5 @@ export async function generateCaseStudy(env: Env, description: string): Promise<
     max_tokens: 500,
   });
 
-  return (res.response ?? res.result?.response ?? '').trim();
+  return extractAiText(res);
 }
