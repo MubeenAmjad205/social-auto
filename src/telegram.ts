@@ -22,14 +22,24 @@ const api = (env: Env, method: string) =>
  * response and falls back to email — a genuine no-op if GMAIL_USER/
  * GMAIL_APP_PASSWORD/ALERT_EMAIL_TO aren't set, see src/email.ts.
  */
-export async function notify(env: Env, text: string) {
+/**
+ * markdown defaults to true for every existing caller's hand-written text
+ * (bold labels, etc.). Pass false for anything containing ARBITRARY content
+ * you didn't author yourself — raw model output, external API error bodies —
+ * since Telegram's legacy Markdown parser 400s on unescaped/unbalanced
+ * `_ * [ ] ( ) ` ` `, silently losing the entire message (this is exactly
+ * how a real diagnostic message went missing — see src/instagram-generate.ts's
+ * parseSlides fallback).
+ */
+export async function notify(env: Env, text: string, opts: { markdown?: boolean } = {}) {
+  const markdown = opts.markdown ?? true;
   const res = await fetch(api(env, 'sendMessage'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: env.TELEGRAM_CHAT_ID,
       text,
-      parse_mode: 'Markdown',
+      ...(markdown ? { parse_mode: 'Markdown' } : {}),
       disable_web_page_preview: true,
     }),
   }).catch(() => null);
@@ -239,7 +249,11 @@ export async function handleTelegramWebhook(request: Request, env: Env, ctx: Exe
         }
       } else if (action === 'retry') {
         if (draft?.status === 'failed') {
-          await store.setStatus(draftId, 'approved');
+          // dueFor() only selects attempts < 3 — without resetting the
+          // counter here, a draft that already hit the 3-strikes cap goes
+          // back to 'approved' but never actually gets picked up again:
+          // no error, no post, permanently silent. Found the hard way.
+          await store.setStatus(draftId, 'approved', { attempts: 0, last_error: null });
           responseText = 'Requeued for the next publish run';
         } else {
           responseText = draft ? `Draft is ${draft.status}, not failed — nothing to retry` : 'Draft not found';

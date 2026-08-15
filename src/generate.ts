@@ -69,7 +69,13 @@ export async function write(env: Env, seed: Seed, facts: Fact[]): Promise<string
       { role: 'system', content: system },
       { role: 'user', content: `WHAT I DID: ${seed.note}\nANGLE: ${seed.angle ?? 'pick the most useful takeaway'}${sources}` },
     ],
-    max_tokens: 600,
+    // gpt-oss-20b is a reasoning model — it can spend its entire max_tokens
+    // budget on internal chain-of-thought and emit zero final-answer text if
+    // the ceiling is too tight (confirmed on the carousel Writer: raw length
+    // 0, not malformed JSON, at max_tokens 700). Generously oversized on
+    // purpose; actual neuron cost tracks what the model really outputs, not
+    // this ceiling.
+    max_tokens: 2000,
   });
 
   return (res.response ?? res.result?.response ?? '').trim();
@@ -94,7 +100,10 @@ export async function artDirect(env: Env, post: string): Promise<string> {
       },
       { role: 'user', content: post },
     ],
-    max_tokens: 200,
+    // Same reasoning-model token-budget note as write() above — this prompt
+    // asks for a short final answer, but the model can still burn the whole
+    // budget thinking before it gets there.
+    max_tokens: 800,
   });
   return (res.response ?? res.result?.response ?? '').trim();
 }
