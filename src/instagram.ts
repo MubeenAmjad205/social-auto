@@ -78,7 +78,19 @@ export async function handleInstagramCallback(request: Request, env: Env): Promi
     body: tokenForm,
   });
   if (!shortRes.ok) return new Response(`token exchange failed: ${await shortRes.text()}`, { status: 502 });
-  const short = await shortRes.json<{ access_token: string; user_id: number }>();
+
+  // Read as text first, not .json() — Instagram business account ids are
+  // 17-digit integers, past Number.MAX_SAFE_INTEGER (16 digits). JSON.parse
+  // (which .json() uses internally) silently rounds anything past that to
+  // the nearest representable double, corrupting the last 1-2 digits. That
+  // corrupted id then fails EVERY graph.instagram.com call referencing it
+  // with a permissions-shaped 400 ("does not exist... missing permissions"),
+  // which looks nothing like a numeric precision bug — regex the exact digit
+  // string out of the raw response instead of trusting the parsed number.
+  const shortText = await shortRes.text();
+  const short = JSON.parse(shortText) as { access_token: string; user_id: number };
+  const userIdMatch = shortText.match(/"user_id"\s*:\s*(\d+)/);
+  const userId = userIdMatch ? userIdMatch[1] : String(short.user_id);
 
   // 2. Exchange for a long-lived token (60 days) — the same token shape
   // refreshInstagramToken below refreshes nightly thereafter.
@@ -100,7 +112,7 @@ export async function handleInstagramCallback(request: Request, env: Env): Promi
       // Reusing the token schema's member_urn field for the IG business user
       // id — same slot LinkedIn's sub-derived URN lives in, different
       // platform's identifier shape. See src/store.ts's tokens collection.
-      member_urn: String(short.user_id),
+      member_urn: userId,
     });
   } finally {
     await store.close();
@@ -109,6 +121,35 @@ export async function handleInstagramCallback(request: Request, env: Env): Promi
   return new Response('Instagram connected. You can close this tab.', {
     headers: { 'Content-Type': 'text/plain' },
   });
+}
+
+/**
+ * Diagnostic only — not part of the publish pipeline. Answers "who does the
+ * saved token actually belong to, and can a plain GET even see that id at
+ * all" directly from Instagram's own API, instead of inferring it from
+ * publish-call error text. See src/index.ts's /run/whoami/<secret> route.
+ */
+export async function debugWhoAmI(env: Env, store: Store): Promise<object> {
+  const tok = await store.getToken('instagram');
+  if (!tok) return { error: 'no Instagram token saved — visit /auth/instagram' };
+
+  const igUserId = tok.member_urn;
+  const byId = await fetch(
+    `${GRAPH}/v23.0/${igUserId}?fields=id,username,account_type&access_token=${tok.access_token}`
+  );
+  // /me resolves to whatever account the TOKEN actually belongs to,
+  // independent of what id we think it is — if this disagrees with
+  // saved_member_urn, the id captured at OAuth time was simply wrong.
+  const byMe = await fetch(
+    `${GRAPH}/v23.0/me?fields=id,username,account_type&access_token=${tok.access_token}`
+  );
+  return {
+    saved_member_urn: igUserId,
+    token_updated_at: tok.updated_at,
+    token_expires_at: tok.expires_at,
+    lookup_by_saved_id: { status: byId.status, body: await byId.json().catch(() => null) },
+    lookup_by_me: { status: byMe.status, body: await byMe.json().catch(() => null) },
+  };
 }
 
 function getCookie(request: Request, name: string): string | null {

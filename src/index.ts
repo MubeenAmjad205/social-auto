@@ -21,7 +21,7 @@ import { MongoStore, type Store, type Platform } from './store';
 import { generateTextPlatforms } from './multiplatform-generate';
 import { generateInstagramDraft } from './instagram-generate';
 import { publishLinkedIn, startLinkedInAuth, handleLinkedInCallback } from './linkedin';
-import { publishInstagram, refreshInstagramToken, startInstagramAuth, handleInstagramCallback } from './instagram';
+import { publishInstagram, refreshInstagramToken, startInstagramAuth, handleInstagramCallback, debugWhoAmI } from './instagram';
 import { publishBluesky } from './bluesky';
 import { publishMastodon } from './mastodon';
 import { publishThreads, refreshThreadsToken, startThreadsAuth, handleThreadsCallback } from './threads';
@@ -190,6 +190,18 @@ export default {
           return new Response(JSON.stringify({ drafts, last_run: last, seeds_in_queue: seeds }, null, 2), {
             headers: { 'Content-Type': 'application/json' },
           });
+        } finally {
+          await store.close();
+        }
+      }
+
+      if (url.pathname.startsWith('/run/whoami/') && request.method === 'GET') {
+        const secret = url.pathname.split('/')[3] ?? '';
+        if (!timingSafeEqual(secret, env.WEBHOOK_SECRET)) return new Response('not found', { status: 404 });
+        const store = storeFor(env);
+        try {
+          const result = await debugWhoAmI(env, store);
+          return new Response(JSON.stringify(result, null, 2), { headers: { 'Content-Type': 'application/json' } });
         } finally {
           await store.close();
         }
