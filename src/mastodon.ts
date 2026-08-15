@@ -20,7 +20,7 @@
 import type { Env } from './index';
 import type { Draft, Store } from './store';
 import { fetchOrAmbiguous } from './errors';
-import { fetchGitHubMedia } from './github-storage';
+import { fetchMedia } from './cloudinary-storage';
 
 // Mastodon's default is 500; many instances raise it. This is a floor, not
 // a hard platform-wide cap the way Bluesky's 300 graphemes is — if your
@@ -43,8 +43,8 @@ export async function publishMastodon(env: Env, store: Store, draft: Draft): Pro
 
   let mediaIds: string[] | undefined;
   if (draft.image_key) {
-    // draft.image_key is a public URL (GitHub-hosted) — see src/generate.ts's renderImage.
-    const media = await fetchGitHubMedia(draft.image_key);
+    // draft.image_key is a public URL (Cloudinary-hosted) — see src/generate.ts's renderImage.
+    const media = await fetchMedia(draft.image_key);
     if (media?.body) {
       const form = new FormData();
       form.append('file', await new Response(media.body).blob());

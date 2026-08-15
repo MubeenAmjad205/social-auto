@@ -33,11 +33,13 @@
   ],
 
   "vars": {
-    // DUMMY — "owner/repo" of a small DEDICATED public GitHub repo (not the
-    // code repo) used to host every generated image. Replaces R2 entirely —
-    // R2 needed a Cloudflare billing profile (a card) just to activate; this
-    // needs none. See src/github-storage.ts and docs/setup/github-media.md.
-    "GITHUB_MEDIA_REPO": "REPLACE-ME-your-username/social-media",
+    // DUMMY — your Cloudinary "cloud name" (visible on the dashboard home
+    // page after signup). Not sensitive — it's part of every delivery URL
+    // anyway. Used to host every generated image, replacing R2 entirely —
+    // R2 needed a Cloudflare billing profile (a card) just to activate;
+    // Cloudinary needs none. See src/cloudinary-storage.ts and
+    // docs/setup/cloudinary.md.
+    "CLOUDINARY_CLOUD_NAME": "REPLACE-ME-your-cloud-name",
 
     // Mandatory on /rest/* calls. Versions are sunset on a rolling basis —
     // bump this quarterly and re-test.
@@ -111,12 +113,14 @@
   //   BLUESKY_APP_PASSWORD
   //   MASTODON_ACCESS_TOKEN  OPTIONAL — only if "mastodon" is in ENABLED_PLATFORMS.
   //                          Generated once in your instance's Settings -> Development.
+  //   CLOUDINARY_API_KEY     From the Cloudinary dashboard home page, next to CLOUDINARY_CLOUD_NAME
+  //   CLOUDINARY_API_SECRET  above. Used for signed uploads — see src/cloudinary-storage.ts.
   //   GEMINI_API_KEY         OPTIONAL — only needed if IMAGE_PROVIDER is set to "gemini"
   //                          above. Free, no card: aistudio.google.com/apikey
   //   GMAIL_USER             OPTIONAL — email fallback if Telegram delivery fails. Both
   //   GMAIL_APP_PASSWORD     blank = fallback off entirely. See docs/setup/email.md.
-  //   GITHUB_PAT             needs contents:write (fine-grained) or classic `repo` scope
-  //                          now — image hosting pushes commits, not just reads for search.
+  //   GITHUB_PAT             only used for search rate limits now (src/research.ts) —
+  //                          read-only access is fine, no write scope needed.
   //   TAVILY_API_KEY
   //   TELEGRAM_BOT_TOKEN
   //   TELEGRAM_CHAT_ID

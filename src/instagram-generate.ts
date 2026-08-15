@@ -23,7 +23,7 @@ import { BANNED } from './generate';
 import { renderCarousel, type Slide, type SlideKind } from './carousel';
 import { svgToPng } from './rasterize';
 import { sendCarouselForApproval, notify } from './telegram';
-import { uploadToGitHub } from './github-storage';
+import { uploadToCloudinary } from './cloudinary-storage';
 
 const SLIDE_SHAPE: SlideKind[] = ['cover', 'point', 'point', 'point', 'example', 'takeaway', 'cta'];
 
@@ -201,7 +201,7 @@ function truncate(s: string): string {
 
 // ---------------------------------------------------------------- RENDER
 
-/** Returns public URLs (GitHub-hosted), not bucket keys — see src/github-storage.ts. */
+/** Returns public URLs (Cloudinary-hosted), not bucket keys — see src/cloudinary-storage.ts. */
 export async function renderAndUploadCarousel(env: Env, slides: Slide[]): Promise<string[]> {
   const svgs = renderCarousel(slides);
   const day = new Date().toISOString().slice(0, 10);
@@ -211,7 +211,7 @@ export async function renderAndUploadCarousel(env: Env, slides: Slide[]): Promis
   for (let i = 0; i < svgs.length; i++) {
     const png = await svgToPng(svgs[i]);
     const key = `carousel/${day}/${batchId}/${i}.png`;
-    urls.push(await uploadToGitHub(env, key, png, 'image/png'));
+    urls.push(await uploadToCloudinary(env, key, png, 'image/png'));
   }
   return urls;
 }
