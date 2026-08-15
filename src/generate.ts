@@ -10,8 +10,6 @@
 
 import type { Env } from './index';
 import type { Fact, Seed, Store } from './store';
-import { research } from './research';
-import { sendDraftForApproval, notify } from './telegram';
 import { resolveProvider, generateImageBytes } from './image-providers';
 import { b64ToBytes } from './util';
 
@@ -23,104 +21,18 @@ export const BANNED = [
   'dive deep', 'the future is here', "it's not just",
 ];
 
-export async function generateDraft(env: Env, store: Store, ctx: ExecutionContext) {
-  const started = Date.now();
-  const steps: any[] = [];
-
-  // Roughly 2:1 own-work to client-work — see docs/03.
-  const preferKind = Math.random() < 0.33 ? 'client' : 'own';
-  const seed = await store.nextSeed(preferKind);
-
-  if (!seed) {
-    await notify(env,
-      '📭 Seed queue is empty — no draft today.\n\n' +
-      'Send `/seed <what happened>` or `/seed client <what happened>`.');
-    return;
-  }
-
-  // nextSeed() above already claimed this seed (set used_at) atomically. If
-  // anything below fails, give it back rather than burning it on a failure
-  // that produced nothing — same principle as returning it on 🗑 Reject.
-  try {
-    // 1. RESEARCH
-    let t = Date.now();
-    let facts: Fact[] = [];
-    try {
-      facts = await research(env, store, seed);
-    } catch (err: any) {
-      // Retrieval failure is not fatal — it degrades to a seed-only post,
-      // which is often the better post anyway.
-      await notify(env, `⚠️ research failed, falling back to seed-only: ${err?.message ?? err}`);
-    }
-    steps.push({ name: 'research', ms: Date.now() - t, facts_found: facts.length });
-
-    // 2. WRITE
-    t = Date.now();
-    const body = await write(env, seed, facts);
-    steps.push({ name: 'write', ms: Date.now() - t, neurons_est: 14 });
-
-    // 3. ART DIRECTION
-    const imagePrompt = await artDirect(env, body);
-
-    // 4. IMAGE — every post gets one. Mandatory on Instagram, materially
-    //    better reach on LinkedIn.
-    t = Date.now();
-    const imageKey = await renderImage(env, store, imagePrompt);
-    // Neuron cost and model name only apply to the workers-ai path — logging
-    // them unconditionally would misreport spend once IMAGE_PROVIDER is set
-    // to a free alternative that costs zero Workers AI neurons.
-    const provider = resolveProvider(env);
-    steps.push({
-      name: 'image', ms: Date.now() - t,
-      neurons_est: provider === 'workers-ai' ? 104 : 0,
-      model: provider === 'workers-ai' ? env.IMAGE_MODEL : provider,
-    });
-
-    // 5. EDIT — annotate, never rewrite.
-    const flags = edit(body, facts, seed);
-
-    const id = await store.createDraft({
-      platform: 'linkedin',
-      status: 'pending',
-      body,
-      image_key: imageKey,
-      image_keys: null,
-      image_prompt: imagePrompt,
-      seed,
-      facts,
-      editor_flags: flags,
-      attempts: 0,
-      last_error: null,
-      remote_id: null,
-      idempotency_key: `li-${crypto.randomUUID()}`,
-    });
-
-    await sendDraftForApproval(env, {
-      id,
-      platform: 'linkedin',
-      body,
-      flags,
-      sourceCount: facts.length,
-      imageUrl: `${env.PUBLIC_R2_BASE}/${imageKey}`,
-    });
-
-    ctx.waitUntil(store.logRun({
-      cron: '0 2 * * *', started_at: new Date(started),
-      duration_ms: Date.now() - started, ok: true, steps,
-      neurons_total_est: steps.reduce((n, s) => n + (s.neurons_est ?? 0), 0),
-      error: null,
-    }));
-  } catch (err) {
-    await store.returnSeed(seed._id);
-    throw err; // still reported to Telegram by the scheduled() wrapper in index.ts
-  }
-}
+// generateDraft (the original LinkedIn-only cron entry point) has been
+// superseded by src/multiplatform-generate.ts's generateTextPlatforms,
+// which — with only "linkedin" in ENABLED_PLATFORMS, the default — does
+// exactly what this function used to do. write/artDirect/renderImage/edit
+// below are the reusable toolkit that orchestrator (and the Bluesky/
+// Threads/Mastodon writers alongside it) is built from.
 
 // ----------------------------------------------------------------- WRITER
 // No tools. No network. It can only state what it was handed — that is the
 // entire grounding mechanism, and it is structural rather than instructional.
 
-async function write(env: Env, seed: Seed, facts: Fact[]): Promise<string> {
+export async function write(env: Env, seed: Seed, facts: Fact[]): Promise<string> {
   const grounded = facts.length > 0;
 
   const system = [
@@ -165,7 +77,7 @@ async function write(env: Env, seed: Seed, facts: Fact[]): Promise<string> {
 
 // ----------------------------------------------------------- ART DIRECTOR
 
-async function artDirect(env: Env, post: string): Promise<string> {
+export async function artDirect(env: Env, post: string): Promise<string> {
   const res: any = await env.AI.run(env.TEXT_MODEL as any, {
     messages: [
       {
@@ -252,11 +164,17 @@ export async function renderImage(env: Env, store: Store, prompt: string): Promi
 // Annotates. Never rewrites. A validator that silently edits is worse than
 // one that flags, because you stop being able to trust what you approved.
 
-function edit(body: string, facts: Fact[], seed: Seed): string[] {
+/**
+ * maxChars defaults to LinkedIn's 3000-char hard cap. The short-form
+ * platforms (Bluesky/Threads/Mastodon) already truncate to their own limits
+ * before this runs — see fitBlueskyText etc. — so this check rarely fires
+ * for them, but passing their real cap keeps the flag honest if it ever does.
+ */
+export function edit(body: string, facts: Fact[], seed: Seed, maxChars = 3000): string[] {
   const flags: string[] = [];
   const corpus = (facts.map(f => `${f.claim} ${f.snippet}`).join(' ') + ' ' + seed.note).toLowerCase();
 
-  if (body.length > 3000) flags.push(`too long: ${body.length}/3000 chars`);
+  if (body.length > maxChars) flags.push(`too long: ${body.length}/${maxChars} chars`);
   if (/https?:\/\//.test(body)) flags.push('contains a URL — link penalty, name the source instead');
 
   const hashtags = (body.match(/#\w+/g) ?? []).length;

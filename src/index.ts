@@ -4,15 +4,31 @@
  * The fetch handler is why this runs on Cloudflare Workers rather than GitHub
  * Actions: LinkedIn's OAuth redirect needs a public URL to land on, and so
  * does the Telegram webhook.
+ *
+ * CRON BUDGET: the free plan caps Cron Triggers at 5 per account — see
+ * docs/02 and docs/07. Adding Bluesky/Threads/Mastodon the naive way (a
+ * generate + publish cron each) would need 6 more slots, impossible on the
+ * free plan. Instead: one generate cron handles every enabled TEXT_PLATFORM
+ * from a single seed (src/multiplatform-generate.ts), Instagram keeps its
+ * own generate cron (a structurally different pipeline, not just a length
+ * limit), and publishDueAll checks every enabled platform's approved queue
+ * — called from both publish windows so nothing waits a full day for its
+ * matching window. Still exactly 5 crons, regardless of how many platforms
+ * ENABLED_PLATFORMS turns on.
  */
 
 import { MongoStore, type Store, type Platform } from './store';
-import { generateDraft } from './generate';
+import { generateTextPlatforms } from './multiplatform-generate';
 import { generateInstagramDraft } from './instagram-generate';
 import { publishLinkedIn, startLinkedInAuth, handleLinkedInCallback } from './linkedin';
 import { publishInstagram, refreshInstagramToken, startInstagramAuth, handleInstagramCallback } from './instagram';
+import { publishBluesky } from './bluesky';
+import { publishMastodon } from './mastodon';
+import { publishThreads, refreshThreadsToken, startThreadsAuth, handleThreadsCallback } from './threads';
 import { notify, notifyPublished, notifyAmbiguousFailure, handleTelegramWebhook } from './telegram';
 import { AmbiguousPublishError } from './errors';
+import { enabledPlatforms } from './platforms';
+import { renderRssFeed } from './rss';
 
 export interface Env {
   AI: Ai;
@@ -22,10 +38,15 @@ export interface Env {
   LINKEDIN_VERSION: string;
   LINKEDIN_REDIRECT_URI: string;
   INSTAGRAM_REDIRECT_URI: string;
+  THREADS_REDIRECT_URI: string;
   IMAGE_MODEL: string;
   TEXT_MODEL: string;
   IMAGE_PROVIDER: string; // "workers-ai" (default) | "pollinations" | "gemini" — see src/image-providers.ts
+  ENABLED_PLATFORMS: string; // comma-separated, default "linkedin,instagram" — see src/platforms.ts
   MONGODB_DB: string;
+  MASTODON_INSTANCE_URL: string; // e.g. https://mastodon.social — Mastodon is federated, no single API host
+  MASTODON_MAX_CHARS: string; // optional, numeric string; defaults to 500 in src/mastodon.ts if unset
+  ALERT_EMAIL_TO: string; // optional — destination for the email fallback, see src/email.ts
 
   MONGODB_URI: string;
   TOKEN_KEY: string;
@@ -33,7 +54,14 @@ export interface Env {
   LINKEDIN_CLIENT_SECRET: string;
   INSTAGRAM_CLIENT_ID: string;
   INSTAGRAM_CLIENT_SECRET: string;
+  THREADS_CLIENT_ID: string;
+  THREADS_CLIENT_SECRET: string;
+  BLUESKY_HANDLE: string;
+  BLUESKY_APP_PASSWORD: string;
+  MASTODON_ACCESS_TOKEN: string;
   GEMINI_API_KEY: string; // optional — only required when IMAGE_PROVIDER=gemini
+  GMAIL_USER: string; // optional — email fallback, no-ops if unset (src/email.ts)
+  GMAIL_APP_PASSWORD: string; // optional
   GITHUB_PAT: string;
   TAVILY_API_KEY: string;
   TELEGRAM_BOT_TOKEN: string;
@@ -55,10 +83,10 @@ export default {
       const store = storeFor(env);
       try {
         switch (event.cron) {
-          case '0 2 * * *':  await generateDraft(env, store, ctx); break;
-          case '0 4 * * *':  await publishDue(env, store, ctx, 'linkedin'); break;
+          case '0 2 * * *':  await generateTextPlatforms(env, store, ctx); break;
+          case '0 4 * * *':  await publishDueAll(env, store, ctx); break;
           case '0 6 * * *':  await generateInstagramDraft(env, store, ctx); break;
-          case '0 9 * * *':  await publishDue(env, store, ctx, 'instagram'); break;
+          case '0 9 * * *':  await publishDueAll(env, store, ctx); break;
           case '0 22 * * *': await health(env, store); break;
         }
       } catch (err: any) {
@@ -76,6 +104,11 @@ export default {
       if (url.pathname === '/auth/linkedin/callback') return await handleLinkedInCallback(request, env);
       if (url.pathname === '/auth/instagram') return startInstagramAuth(env);
       if (url.pathname === '/auth/instagram/callback') return await handleInstagramCallback(request, env);
+      if (url.pathname === '/auth/threads') return startThreadsAuth(env);
+      if (url.pathname === '/auth/threads/callback') return await handleThreadsCallback(request, env);
+
+      // Public, read-only, no auth — meant to be subscribed to. See src/rss.ts.
+      if (url.pathname === '/feed.xml') return await renderRssFeed(env);
 
       // The unguessable path segment is the shared secret with Telegram.
       if (url.pathname === `/tg/${env.WEBHOOK_SECRET}` && request.method === 'POST') {
@@ -94,6 +127,20 @@ export default {
   },
 };
 
+const PUBLISHERS: Record<Platform, (env: Env, store: Store, draft: any) => Promise<string>> = {
+  linkedin: publishLinkedIn,
+  instagram: publishInstagram,
+  bluesky: publishBluesky,
+  threads: publishThreads,
+  mastodon: publishMastodon,
+};
+
+async function publishDueAll(env: Env, store: Store, ctx: ExecutionContext) {
+  for (const platform of enabledPlatforms(env)) {
+    await publishDue(env, store, ctx, platform);
+  }
+}
+
 async function publishDue(env: Env, store: Store, ctx: ExecutionContext, platform: Platform) {
   for (const draft of await store.dueFor(platform, 2)) {
     try {
@@ -101,9 +148,7 @@ async function publishDue(env: Env, store: Store, ctx: ExecutionContext, platfor
       // actually succeeded must not be retried into a duplicate post.
       await store.setStatus(draft._id, 'approved', { attempts: draft.attempts + 1 });
 
-      const remoteId = platform === 'linkedin'
-        ? await publishLinkedIn(env, store, draft)
-        : await publishInstagram(env, store, draft);
+      const remoteId = await PUBLISHERS[platform](env, store, draft);
 
       await store.setStatus(draft._id, 'published', {
         remote_id: remoteId,
@@ -145,25 +190,40 @@ async function publishDue(env: Env, store: Store, ctx: ExecutionContext, platfor
 }
 
 async function health(env: Env, store: Store) {
-  // Instagram: fully automatic. Refresh nightly and unconditionally — there is
-  // no penalty for refreshing early, and the failure mode of NOT refreshing is
-  // a full manual re-authorisation.
-  try {
-    await refreshInstagramToken(env, store);
-  } catch (err: any) {
-    await notify(env, `⚠️ IG token refresh failed: ${err?.message ?? err}`);
+  const enabled = enabledPlatforms(env);
+
+  // Instagram + Threads: fully automatic. Refresh nightly and
+  // unconditionally — there is no penalty for refreshing early, and the
+  // failure mode of NOT refreshing is a full manual re-authorisation.
+  if (enabled.has('instagram')) {
+    try {
+      await refreshInstagramToken(env, store);
+    } catch (err: any) {
+      await notify(env, `⚠️ IG token refresh failed: ${err?.message ?? err}`);
+    }
+  }
+  if (enabled.has('threads')) {
+    try {
+      await refreshThreadsToken(env, store);
+    } catch (err: any) {
+      await notify(env, `⚠️ Threads token refresh failed: ${err?.message ?? err}`);
+    }
   }
 
   // LinkedIn: a standard "Share on LinkedIn" app never receives a
   // refresh_token — only approved MDP partners do. So the best available
   // behaviour is to nag before it dies, with a one-tap link.
-  const li = await store.getToken('linkedin');
-  const daysLeft = li ? Math.floor((+li.expires_at - Date.now()) / 864e5) : -1;
-  if (daysLeft <= 10) {
-    const authUrl = new URL('/auth/linkedin', env.LINKEDIN_REDIRECT_URI).toString();
-    await notify(env,
-      `🔑 LinkedIn token expires in ${daysLeft} day(s).\nTap to re-authorise (~30s):\n${authUrl}`);
+  if (enabled.has('linkedin')) {
+    const li = await store.getToken('linkedin');
+    const daysLeft = li ? Math.floor((+li.expires_at - Date.now()) / 864e5) : -1;
+    if (daysLeft <= 10) {
+      const authUrl = new URL('/auth/linkedin', env.LINKEDIN_REDIRECT_URI).toString();
+      await notify(env,
+        `🔑 LinkedIn token expires in ${daysLeft} day(s).\nTap to re-authorise (~30s):\n${authUrl}`);
+    }
   }
+  // Bluesky (app password, re-authenticated every publish) and Mastodon (a
+  // non-expiring user token) have no token lifecycle to check here.
 
   // The real failure mode of this system is not a broken API. It is an empty
   // seed queue.

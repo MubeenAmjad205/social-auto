@@ -9,12 +9,21 @@
 import type { Env } from './index';
 import { renderImage } from './generate';
 import { renderAndUploadCarousel } from './instagram-generate';
+import { sendFallbackEmail } from './email';
+import { generateCaseStudy } from './casestudy';
 
 const api = (env: Env, method: string) =>
   `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`;
 
+/**
+ * Telegram is the entire monitoring channel — if a send silently fails
+ * (bad token, Telegram outage, chat blocked), the previous version of this
+ * function had no way of knowing or telling you. It now checks the actual
+ * response and falls back to email — a genuine no-op if GMAIL_USER/
+ * GMAIL_APP_PASSWORD/ALERT_EMAIL_TO aren't set, see src/email.ts.
+ */
 export async function notify(env: Env, text: string) {
-  await fetch(api(env, 'sendMessage'), {
+  const res = await fetch(api(env, 'sendMessage'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -23,7 +32,11 @@ export async function notify(env: Env, text: string) {
       parse_mode: 'Markdown',
       disable_web_page_preview: true,
     }),
-  });
+  }).catch(() => null);
+
+  if (!res || !res.ok) {
+    await sendFallbackEmail(env, 'Telegram delivery failed', text).catch(() => {});
+  }
 }
 
 /**
@@ -316,6 +329,23 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
         ? `\nLast run: \`${last.cron}\` ${last.ok ? '✅' : '🔴'} ${new Date(last.started_at).toISOString()}`
         : '\nNo runs logged yet.';
       await notify(env, `🌱 ${n} unused seed(s) in the queue.${lastLine}`);
+      return new Response('ok');
+    }
+
+    // ---- /casestudy — writes a Company Page post from a delivered
+    // project's description. Doesn't touch a seed, doesn't publish anywhere
+    // (Company Page publishing needs Marketing Developer Platform approval
+    // this project doesn't have) — the text comes back over Telegram for
+    // you to paste yourself. See src/casestudy.ts.
+    if (text.startsWith('/casestudy')) {
+      const description = text.replace(/^\/casestudy\s*/, '').trim();
+      if (!description) {
+        await notify(env, 'Usage:\n`/casestudy <what you delivered, for who, what it cost/saved>`');
+      } else {
+        const post = await generateCaseStudy(env, description);
+        await notify(env, `📄 *Company Page draft* — not auto-published, paste this yourself:\n\n${post}`);
+      }
+      return new Response('ok');
     }
 
     return new Response('ok');
