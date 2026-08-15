@@ -32,19 +32,12 @@
     { "type": "Data", "globs": ["**/*.ttf"], "fallthrough": true }
   ],
 
-  "r2_buckets": [
-    {
-      "binding": "MEDIA",
-      "bucket_name": "social-media"
-    }
-  ],
-
   "vars": {
-    // DUMMY — replace once the R2 bucket has a public URL (custom domain or
-    // its r2.dev subdomain). MUST be publicly readable — Instagram fetches
-    // this URL itself and will not accept file bytes. robots.txt on this
-    // domain must not block Meta's crawler.
-    "PUBLIC_R2_BASE": "https://REPLACE-ME-media.example.workers.dev",
+    // DUMMY — "owner/repo" of a small DEDICATED public GitHub repo (not the
+    // code repo) used to host every generated image. Replaces R2 entirely —
+    // R2 needed a Cloudflare billing profile (a card) just to activate; this
+    // needs none. See src/github-storage.ts and docs/setup/github-media.md.
+    "GITHUB_MEDIA_REPO": "REPLACE-ME-your-username/social-media",
 
     // Mandatory on /rest/* calls. Versions are sunset on a rolling basis —
     // bump this quarterly and re-test.
@@ -110,9 +103,20 @@
   //                          visiting /auth/instagram now captures the IG business user
   //                          id automatically and stores it on the token document.
   //   INSTAGRAM_CLIENT_SECRET
+  //   THREADS_CLIENT_ID      OPTIONAL — only if "threads" is in ENABLED_PLATFORMS.
+  //                          Same Meta App as Instagram, Threads product added.
+  //   THREADS_CLIENT_SECRET
+  //   BLUESKY_HANDLE         OPTIONAL — only if "bluesky" is in ENABLED_PLATFORMS.
+  //                          Settings -> App Passwords on bsky.app, NOT your real password.
+  //   BLUESKY_APP_PASSWORD
+  //   MASTODON_ACCESS_TOKEN  OPTIONAL — only if "mastodon" is in ENABLED_PLATFORMS.
+  //                          Generated once in your instance's Settings -> Development.
   //   GEMINI_API_KEY         OPTIONAL — only needed if IMAGE_PROVIDER is set to "gemini"
   //                          above. Free, no card: aistudio.google.com/apikey
-  //   GITHUB_PAT
+  //   GMAIL_USER             OPTIONAL — email fallback if Telegram delivery fails. Both
+  //   GMAIL_APP_PASSWORD     blank = fallback off entirely. See docs/setup/email.md.
+  //   GITHUB_PAT             needs contents:write (fine-grained) or classic `repo` scope
+  //                          now — image hosting pushes commits, not just reads for search.
   //   TAVILY_API_KEY
   //   TELEGRAM_BOT_TOKEN
   //   TELEGRAM_CHAT_ID

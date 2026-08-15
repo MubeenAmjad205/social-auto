@@ -32,9 +32,15 @@ import { renderRssFeed } from './rss';
 
 export interface Env {
   AI: Ai;
-  MEDIA: R2Bucket;
 
-  PUBLIC_R2_BASE: string;
+  // No R2 binding — image storage moved to GitHub (src/github-storage.ts).
+  // R2 requires a Cloudflare billing profile (a card on file) to activate
+  // at all, and turns out, once traced through every code path, to have no
+  // remaining necessary role once the shared image + carousel slides +
+  // style_refs (which just point at a previous draft's image) all live on
+  // GitHub instead. One less thing needing a card anywhere in this stack.
+  GITHUB_MEDIA_REPO: string; // "owner/repo" — a small DEDICATED public repo, not the code repo
+
   LINKEDIN_VERSION: string;
   LINKEDIN_REDIRECT_URI: string;
   INSTAGRAM_REDIRECT_URI: string;
@@ -62,6 +68,9 @@ export interface Env {
   GEMINI_API_KEY: string; // optional — only required when IMAGE_PROVIDER=gemini
   GMAIL_USER: string; // optional — email fallback, no-ops if unset (src/email.ts)
   GMAIL_APP_PASSWORD: string; // optional
+  // Needs contents:write (fine-grained) or the classic `repo` scope now —
+  // read-only search access isn't enough to push image commits. See
+  // docs/setup/github-media.md if your existing PAT was created read-only.
   GITHUB_PAT: string;
   TAVILY_API_KEY: string;
   TELEGRAM_BOT_TOKEN: string;

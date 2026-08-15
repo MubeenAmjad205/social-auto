@@ -252,7 +252,7 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
             body: draft.body,
             flags: draft.editor_flags,
             sourceCount: draft.facts.length,
-            imageUrls: imageKeys.map(k => `${env.PUBLIC_R2_BASE}/${k}`),
+            imageUrls: imageKeys, // already public URLs — see renderAndUploadCarousel
           });
         } else {
           const imageKey = await renderImage(env, store, draft.image_prompt);
@@ -263,7 +263,7 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
             body: draft.body,
             flags: draft.editor_flags,
             sourceCount: draft.facts.length,
-            imageUrl: `${env.PUBLIC_R2_BASE}/${imageKey}`,
+            imageUrl: imageKey, // already a public URL — see src/generate.ts's renderImage
           });
         }
         responseText = 'New image sent';

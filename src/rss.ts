@@ -50,7 +50,7 @@ export async function renderRssFeed(env: Env): Promise<Response> {
 <channel>
   <title>social-worker</title>
   <description>Posts published across LinkedIn, Instagram, and connected platforms.</description>
-  <link>${escapeXml(env.PUBLIC_R2_BASE)}</link>
+  <link>${escapeXml(channelLink(env))}</link>
   <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
 ${items}
 </channel>
@@ -59,6 +59,20 @@ ${items}
   return new Response(xml, {
     headers: { 'Content-Type': 'application/rss+xml; charset=utf-8' },
   });
+}
+
+/**
+ * The RSS <channel><link> is just "where can a reader learn more" metadata
+ * — not tied to image hosting. Derived from the Worker's own hostname
+ * (LinkedIn's redirect URI always has one, since LinkedIn is enabled by
+ * default) rather than a dedicated var, since this is cosmetic, not load-bearing.
+ */
+function channelLink(env: Env): string {
+  try {
+    return new URL(env.LINKEDIN_REDIRECT_URI).origin;
+  } catch {
+    return 'https://workers.dev';
+  }
 }
 
 function firstLine(body: string): string {

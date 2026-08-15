@@ -152,7 +152,7 @@ export async function publishThreads(env: Env, store: Store, draft: Draft): Prom
     text,
     access_token: tok.access_token,
   });
-  if (draft.image_key) params.set('image_url', `${env.PUBLIC_R2_BASE}/${draft.image_key}`);
+  if (draft.image_key) params.set('image_url', draft.image_key); // already a public URL
 
   const create = await fetch(`${GRAPH}/${API_VERSION}/me/threads?${params}`, { method: 'POST' });
   if (!create.ok) throw new Error(`threads container ${create.status}: ${await create.text()}`);

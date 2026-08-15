@@ -3,7 +3,7 @@
 #
 # These are SECRETS -> in production they go via `wrangler secret put` (or
 # `wrangler secret bulk secrets.json`, see secrets.example.json), never in
-# wrangler.jsonc. Non-secret vars (PUBLIC_R2_BASE, LINKEDIN_VERSION,
+# wrangler.jsonc. Non-secret vars (GITHUB_MEDIA_REPO, LINKEDIN_VERSION,
 # LINKEDIN_REDIRECT_URI, INSTAGRAM_REDIRECT_URI, THREADS_REDIRECT_URI,
 # ENABLED_PLATFORMS, MASTODON_INSTANCE_URL, MASTODON_MAX_CHARS,
 # ALERT_EMAIL_TO, IMAGE_MODEL, TEXT_MODEL, MONGODB_DB) already live in
@@ -56,8 +56,11 @@ GEMINI_API_KEY=
 GMAIL_USER=
 GMAIL_APP_PASSWORD=
 
-# GitHub personal access token — raises search API limit 60/hr -> 5,000/hr.
-# No scopes needed, it's only used for public repo search.
+# GitHub personal access token — TWO jobs now: raises the search API limit
+# 60/hr -> 5,000/hr (src/research.ts), AND hosts every generated image
+# (src/github-storage.ts, replacing R2 — see docs/setup/github-media.md).
+# Needs `contents:write` (fine-grained) or the classic `repo` scope — a
+# read-only token from before image hosting existed needs re-generating.
 GITHUB_PAT=
 
 # https://app.tavily.com — 1,000 free credits/month, no card required.
