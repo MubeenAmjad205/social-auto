@@ -23,6 +23,7 @@ import { BANNED } from './generate';
 import { renderCarousel, type Slide, type SlideKind } from './carousel';
 import { svgToPng } from './rasterize';
 import { sendCarouselForApproval, notify } from './telegram';
+import { uploadToGitHub } from './github-storage';
 
 const SLIDE_SHAPE: SlideKind[] = ['cover', 'point', 'point', 'point', 'example', 'takeaway', 'cta'];
 
@@ -87,7 +88,7 @@ export async function generateInstagramDraft(env: Env, store: Store, ctx: Execut
       body: caption,
       flags,
       sourceCount: facts.length,
-      imageUrls: imageKeys.map(k => `${env.PUBLIC_R2_BASE}/${k}`),
+      imageUrls: imageKeys, // already public URLs — see renderAndUploadCarousel above
     });
 
     ctx.waitUntil(store.logRun({
@@ -200,19 +201,19 @@ function truncate(s: string): string {
 
 // ---------------------------------------------------------------- RENDER
 
+/** Returns public URLs (GitHub-hosted), not bucket keys — see src/github-storage.ts. */
 export async function renderAndUploadCarousel(env: Env, slides: Slide[]): Promise<string[]> {
   const svgs = renderCarousel(slides);
   const day = new Date().toISOString().slice(0, 10);
   const batchId = crypto.randomUUID();
 
-  const keys: string[] = [];
+  const urls: string[] = [];
   for (let i = 0; i < svgs.length; i++) {
     const png = await svgToPng(svgs[i]);
     const key = `carousel/${day}/${batchId}/${i}.png`;
-    await env.MEDIA.put(key, png, { httpMetadata: { contentType: 'image/png' } });
-    keys.push(key);
+    urls.push(await uploadToGitHub(env, key, png, 'image/png'));
   }
-  return keys;
+  return urls;
 }
 
 // ----------------------------------------------------------------- misc

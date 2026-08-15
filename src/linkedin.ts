@@ -9,6 +9,7 @@
 import type { Env } from './index';
 import type { Store, Draft } from './store';
 import { fetchOrAmbiguous } from './errors';
+import { fetchGitHubMedia } from './github-storage';
 
 const AUTH = 'https://www.linkedin.com/oauth/v2/authorization';
 const TOKEN = 'https://www.linkedin.com/oauth/v2/accessToken';
@@ -114,14 +115,17 @@ export async function publishLinkedIn(env: Env, store: Store, draft: Draft): Pro
   if (!init.ok) throw new Error(`initializeUpload ${init.status}: ${await init.text()}`);
   const { value } = await init.json<{ value: { uploadUrl: string; image: string } }>();
 
-  // 2. Stream the bytes straight from R2 — no buffering, no CPU cost.
-  const obj = await env.MEDIA.get(draft.image_key!);
-  if (!obj) throw new Error(`R2 object missing: ${draft.image_key}`);
+  // 2. Stream the bytes from GitHub (draft.image_key is a public URL — see
+  // src/generate.ts's renderImage) straight into LinkedIn's upload — no
+  // buffering, no CPU cost. R2's free binding read is gone; this is a real
+  // subrequest now, but it's one call, trivial against the 50/invocation budget.
+  const media = await fetchGitHubMedia(draft.image_key!);
+  if (!media?.body) throw new Error(`media fetch failed: ${draft.image_key}`);
 
   const put = await fetch(value.uploadUrl, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${tok.access_token}` },
-    body: obj.body,
+    body: media.body,
   });
   if (!put.ok) throw new Error(`image PUT ${put.status}: ${await put.text()}`);
 

@@ -197,7 +197,7 @@ async function createSingleContainer(env: Env, igUserId: string, accessToken: st
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      image_url: `${env.PUBLIC_R2_BASE}/${draft.image_key}`,
+      image_url: draft.image_key, // already a public URL — see src/generate.ts's renderImage
       caption: draft.body,
       access_token: accessToken,
     }),
@@ -220,12 +220,12 @@ async function createCarouselContainer(env: Env, igUserId: string, accessToken: 
   // happen. Polling all children concurrently keeps the worst case at
   // ~100s total regardless of slide count.
   const childIds: string[] = [];
-  for (const key of draft.image_keys!) {
+  for (const url of draft.image_keys!) { // already public URLs — see src/instagram-generate.ts's renderAndUploadCarousel
     const create = await fetch(`${GRAPH}/v23.0/${igUserId}/media`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        image_url: `${env.PUBLIC_R2_BASE}/${key}`,
+        image_url: url,
         is_carousel_item: true,
         access_token: accessToken,
       }),

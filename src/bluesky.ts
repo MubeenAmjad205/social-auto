@@ -13,6 +13,7 @@
 import type { Env } from './index';
 import type { Draft, Store } from './store';
 import { fetchOrAmbiguous } from './errors';
+import { fetchGitHubMedia } from './github-storage';
 
 const PDS = 'https://bsky.social';
 // 300 graphemes is AT Protocol's real limit, enforced via a specific
@@ -51,16 +52,17 @@ export async function publishBluesky(env: Env, store: Store, draft: Draft): Prom
 
   let embed: any = undefined;
   if (draft.image_key) {
-    const obj = await env.MEDIA.get(draft.image_key);
-    if (obj) {
+    // draft.image_key is a public URL (GitHub-hosted) — see src/generate.ts's renderImage.
+    const media = await fetchGitHubMedia(draft.image_key);
+    if (media?.body) {
       // uploadBlob wants raw bytes with the real content type, not JSON.
       const upload = await fetch(`${PDS}/xrpc/com.atproto.repo.uploadBlob`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${session.accessJwt}`,
-          'Content-Type': obj.httpMetadata?.contentType || 'image/jpeg',
+          'Content-Type': media.contentType,
         },
-        body: obj.body,
+        body: media.body,
       });
       if (upload.ok) {
         const { blob } = await upload.json<{ blob: unknown }>();

@@ -12,16 +12,19 @@ platforms have since been built** — see "Status vs. the docs" below for
 exactly what changed and the trade-offs that came with it.
 
 **Platform setup, step by step:** [`docs/setup/`](docs/setup/):
-1. [`docs/setup/linkedin.md`](docs/setup/linkedin.md) — Company Page, dev app, products, OAuth
-2. [`docs/setup/facebook.md`](docs/setup/facebook.md) — the Meta Developer App that hosts Instagram's and Threads' APIs (this project never publishes to Facebook itself)
-3. [`docs/setup/instagram.md`](docs/setup/instagram.md) — Professional account, permissions, `/auth/instagram`
-4. [`docs/setup/threads.md`](docs/setup/threads.md) — same Meta App, add the Threads product, `/auth/threads`
-5. [`docs/setup/bluesky.md`](docs/setup/bluesky.md) — an app password, no OAuth flow at all
-6. [`docs/setup/mastodon.md`](docs/setup/mastodon.md) — a static token generated once in your instance's UI, no OAuth flow
-7. [`docs/setup/email.md`](docs/setup/email.md) — optional last-resort alert channel if Telegram itself ever fails to deliver
+1. [`docs/setup/github-media.md`](docs/setup/github-media.md) — **do this first**, every other platform needs it: a public GitHub repo hosts every generated image now, replacing R2 entirely
+2. [`docs/setup/linkedin.md`](docs/setup/linkedin.md) — Company Page, dev app, products, OAuth
+3. [`docs/setup/facebook.md`](docs/setup/facebook.md) — the Meta Developer App that hosts Instagram's and Threads' APIs (this project never publishes to Facebook itself)
+4. [`docs/setup/instagram.md`](docs/setup/instagram.md) — Professional account, permissions, `/auth/instagram`
+5. [`docs/setup/threads.md`](docs/setup/threads.md) — same Meta App, add the Threads product, `/auth/threads`
+6. [`docs/setup/bluesky.md`](docs/setup/bluesky.md) — an app password, no OAuth flow at all
+7. [`docs/setup/mastodon.md`](docs/setup/mastodon.md) — a static token generated once in your instance's UI, no OAuth flow
+8. [`docs/setup/email.md`](docs/setup/email.md) — optional last-resort alert channel if Telegram itself ever fails to deliver
 
 Every platform above is off by default except LinkedIn and Instagram
 (`ENABLED_PLATFORMS` in `wrangler.jsonc`) — set up only the ones you want.
+**No Cloudflare billing profile is needed anywhere in this project** — R2
+was the one thing that required a card, and it's gone.
 
 ## Layout
 
@@ -36,6 +39,7 @@ src/errors.ts               ambiguous-vs-clean publish failure classification
 src/util.ts                 shared base64 helpers
 src/platforms.ts            ENABLED_PLATFORMS parsing — the on/off switch for everything below
 src/research.ts             the Researcher agent (shared by every platform)
+src/github-storage.ts       image hosting — replaces R2, no billing profile needed anywhere
 src/generate.ts             Writer/Art-Director/Editor/image toolkit (LinkedIn's shape; reused by others)
 src/multiplatform-generate.ts  one seed, one research pass, one image -> N platform-voiced drafts
 src/image-providers.ts      optional FLUX alternatives: Pollinations, Gemini 2.5 Flash Image
@@ -89,7 +93,7 @@ stops:
     "Serve JPEG, not PNG — more reliable and faster for Meta to fetch."
     PNG is generally accepted by the Graph API, but this is unverified
     against a real Instagram account. If Meta rejects it, the fix is a
-    PNG->JPEG re-encode step before the R2 upload (e.g. `@jsquash/jpeg`) —
+    PNG->JPEG re-encode step before the GitHub upload (e.g. `@jsquash/jpeg`) —
     not added yet because it's another WASM codec on top of an already
     1.49MB-gzip bundle.
   - **The free-plan cron budget is now fully spent.** Docs/02 and docs/07
@@ -162,6 +166,38 @@ default except the two that shipped with v1.
   (flagged in `src/threads.ts`); Bluesky's and Threads' character limits
   are enforced via Unicode code-point counting, not true grapheme
   segmentation (a heuristic, not a bug — see `src/bluesky.ts`).
+
+## R2 removed entirely — image hosting moved to GitHub
+
+Every doc, and this README until now, described Cloudflare R2 as the media
+store. **It's gone.** R2 is the one component in this whole stack that
+needs a Cloudflare billing profile (a card on file) just to activate — and
+unlike everything else here, it's genuine pay-as-you-go beyond the free
+tier, not a hard-capped sandbox. `src/github-storage.ts` replaces it:
+every generated image is hosted via a dedicated public GitHub repo instead,
+reusing the `GITHUB_PAT` secret already required for search. No card
+anywhere in this project, for anything, as shipped.
+
+This wasn't a planned trade — it fell out of actually tracing the code:
+`style_refs` (the multi-reference visual-consistency feature) just point at
+a *previous* draft's image. Once that image lives on GitHub instead of R2,
+the reference has to follow it there too — which meant R2 ended up with
+nothing left to do. Keeping a half-used R2 binding around "just in case"
+would have been worse than removing it: dead config protecting nothing.
+
+Two things this adds beyond just removing the risk:
+- **A hard, self-imposed safety ceiling**, checked before every upload via
+  GitHub's own repo-size API (`src/github-storage.ts`) — refuses and alerts
+  via Telegram if the media repo ever crosses 500MB, ~30x this project's
+  expected usage. Not a monitoring dashboard you have to remember to check;
+  a check that runs on every write.
+- `draft.image_key` / `draft.image_keys` in Atlas keep their field names
+  (schema stability) but now hold full public URLs, not object-storage
+  keys — worth knowing if you're inspecting the `drafts` collection directly.
+
+See [`docs/setup/github-media.md`](docs/setup/github-media.md) for setup —
+it's now the first thing to configure, since every platform's image path
+depends on it.
 
 ## Hardening pass — bugs found and fixed after the initial build
 
@@ -241,13 +277,15 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<worker>/tg/<WE
 # visit https://<worker>/auth/instagram in a browser, click Allow
 ```
 
-`PUBLIC_R2_BASE`, `LINKEDIN_VERSION`, `LINKEDIN_REDIRECT_URI`, `IMAGE_MODEL`,
-`TEXT_MODEL`, `MONGODB_DB` are plain vars, not secrets — edit them directly in
-[`wrangler.jsonc`](wrangler.jsonc). `PUBLIC_R2_BASE` needs either a custom
-domain on the R2 bucket or its `r2.dev` public URL; `LINKEDIN_REDIRECT_URI`
-needs your Worker's actual `workers.dev` subdomain (`wrangler whoami` or the
-Cloudflare dashboard) and must match the redirect URL registered on the
-LinkedIn app exactly.
+`GITHUB_MEDIA_REPO`, `LINKEDIN_VERSION`, `LINKEDIN_REDIRECT_URI`,
+`INSTAGRAM_REDIRECT_URI`, `THREADS_REDIRECT_URI`, `ENABLED_PLATFORMS`,
+`MASTODON_INSTANCE_URL`, `MASTODON_MAX_CHARS`, `ALERT_EMAIL_TO`,
+`IMAGE_MODEL`, `TEXT_MODEL`, `IMAGE_PROVIDER`, `MONGODB_DB` are plain vars,
+not secrets — edit them directly in [`wrangler.jsonc`](wrangler.jsonc).
+`LINKEDIN_REDIRECT_URI`/`INSTAGRAM_REDIRECT_URI`/`THREADS_REDIRECT_URI` need
+your Worker's actual `workers.dev` subdomain (`wrangler whoami` or the
+Cloudflare dashboard) and must match the redirect URL registered on each
+platform's app exactly.
 
 ### Dummy values — every one of these needs to be replaced
 
@@ -258,13 +296,18 @@ actually deploy or run the spike. `grep -rn "REPLACE_ME\|REPLACE-ME" .`
 
 | File | Key(s) | Replace with |
 |---|---|---|
-| `wrangler.jsonc` | `PUBLIC_R2_BASE` | The R2 bucket's public URL (custom domain or `r2.dev`) |
+| `wrangler.jsonc` | `GITHUB_MEDIA_REPO` | `"your-username/social-media"` — a dedicated public repo. See `docs/setup/github-media.md` (**do this one first**) |
 | `wrangler.jsonc` | `LINKEDIN_REDIRECT_URI` | `https://social-worker.<your-subdomain>.workers.dev/auth/linkedin/callback` — must exactly match the LinkedIn app's registered redirect URL. See `docs/setup/linkedin.md` |
 | `wrangler.jsonc` | `INSTAGRAM_REDIRECT_URI` | Same subdomain, `/auth/instagram/callback` — registered on the Meta App's Instagram product. See `docs/setup/facebook.md` |
+| `wrangler.jsonc` | `THREADS_REDIRECT_URI` | Same subdomain, `/auth/threads/callback`. See `docs/setup/threads.md` |
+| `wrangler.jsonc` | `MASTODON_INSTANCE_URL` | Only if `"mastodon"` is in `ENABLED_PLATFORMS`. See `docs/setup/mastodon.md` |
 | `.dev.vars`, `secrets.json` | `MONGODB_URI` | Atlas non-SRV multi-host connection string |
 | `.dev.vars`, `secrets.json` | `LINKEDIN_CLIENT_ID` / `LINKEDIN_CLIENT_SECRET` | From the LinkedIn developer app's Auth tab. See `docs/setup/linkedin.md` |
 | `.dev.vars`, `secrets.json` | `INSTAGRAM_CLIENT_ID` / `INSTAGRAM_CLIENT_SECRET` | The Meta App's Instagram API credentials. See `docs/setup/facebook.md`. There is no `IG_USER_ID` secret — visiting `/auth/instagram` now captures the IG business user id automatically |
-| `.dev.vars`, `secrets.json` | `GITHUB_PAT` | A PAT with no special scopes, just for search rate limit |
+| `.dev.vars`, `secrets.json` | `THREADS_CLIENT_ID` / `THREADS_CLIENT_SECRET` | Only if `"threads"` is enabled. Same Meta App as Instagram. See `docs/setup/threads.md` |
+| `.dev.vars`, `secrets.json` | `BLUESKY_HANDLE` / `BLUESKY_APP_PASSWORD` | Only if `"bluesky"` is enabled. An app password, not your real password. See `docs/setup/bluesky.md` |
+| `.dev.vars`, `secrets.json` | `MASTODON_ACCESS_TOKEN` | Only if `"mastodon"` is enabled. Generated once in your instance's UI, no OAuth flow. See `docs/setup/mastodon.md` |
+| `.dev.vars`, `secrets.json` | `GITHUB_PAT` | Needs `contents:write` (fine-grained) or classic `repo` scope now — it hosts every image, not just search anymore. See `docs/setup/github-media.md` |
 | `.dev.vars`, `secrets.json` | `TAVILY_API_KEY` | app.tavily.com, free tier |
 | `.dev.vars`, `secrets.json` | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | From @BotFather / @userinfobot |
 | `spike/.dev.vars` | `MONGODB_URI` | Same Atlas string as above |
@@ -272,11 +315,12 @@ actually deploy or run the spike. `grep -rn "REPLACE_ME\|REPLACE-ME" .`
 `TOKEN_KEY` and `WEBHOOK_SECRET` are **not** dummies — they're real generated
 values, already usable as-is. Only regenerate them if you specifically want
 to (`openssl rand -base64 32` / `openssl rand -hex 24`), and if you do,
-update both `.dev.vars` and `secrets.json` to match.
+update both `.dev.vars` and `secrets.json` to match. `GMAIL_USER` /
+`GMAIL_APP_PASSWORD` / `GEMINI_API_KEY` are genuinely optional — leave them
+blank unless you're using the email fallback or `IMAGE_PROVIDER=gemini`.
 
-`bucket_name: "social-media"` in `wrangler.jsonc` isn't a placeholder either
-— it's the name the R2 bucket needs to be created with, or edit the binding
-to match whatever name you actually create.
+There is no R2 bucket to create and no Cloudflare billing profile needed
+anywhere — see `docs/setup/github-media.md` for why and what replaced it.
 
 Before any of this: create the LinkedIn Company Page, request "Share on
 LinkedIn", and file the Meta app review for Instagram. See

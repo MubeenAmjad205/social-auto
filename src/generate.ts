@@ -12,6 +12,7 @@ import type { Env } from './index';
 import type { Fact, Seed, Store } from './store';
 import { resolveProvider, generateImageBytes } from './image-providers';
 import { b64ToBytes } from './util';
+import { uploadToGitHub, fetchGitHubMedia } from './github-storage';
 
 export const BANNED = [
   'delve', 'tapestry', 'navigate the', 'leverage', 'testament to',
@@ -109,6 +110,11 @@ export async function artDirect(env: Env, post: string): Promise<string> {
  * IMAGE_PROVIDER (wrangler.jsonc, default "workers-ai") can swap this whole
  * backend for a free alternative — see src/image-providers.ts for what's
  * available and the trade-offs (namely: losing style_refs consistency).
+ *
+ * Returns a public URL (GitHub-hosted — see src/github-storage.ts), not a
+ * bucket key. R2 held this before; it's gone now because once every draft's
+ * image lives on GitHub, style_refs (which just point at a PREVIOUS draft's
+ * image) had to follow it there too — leaving R2 with nothing left to do.
  */
 export async function renderImage(env: Env, store: Store, prompt: string): Promise<string> {
   const provider = resolveProvider(env);
@@ -126,9 +132,10 @@ export async function renderImage(env: Env, store: Store, prompt: string): Promi
     // This is what makes the feed look like one designer made it. Almost nobody
     // uses this, and it matters more than model quality. Only Workers AI's
     // FLUX.2 supports it — the alternative providers don't wire this up.
-    for (const [i, key] of (await store.activeStyleRefs()).entries()) {
-      const obj = await env.MEDIA.get(key);
-      if (obj) form.append(`input_image_${i}`, await obj.blob());
+    // Fetched by URL now, not read from a binding — see fetchGitHubMedia.
+    for (const [i, url] of (await store.activeStyleRefs()).entries()) {
+      const media = await fetchGitHubMedia(url);
+      if (media?.body) form.append(`input_image_${i}`, await new Response(media.body).blob());
     }
 
     // FormData won't expose its boundary. Wrapping it in a Response serializes
@@ -156,8 +163,7 @@ export async function renderImage(env: Env, store: Store, prompt: string): Promi
 
   const ext = contentType === 'image/png' ? 'png' : 'jpg';
   const key = `img/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}.${ext}`;
-  await env.MEDIA.put(key, bytes, { httpMetadata: { contentType } });
-  return key;
+  return uploadToGitHub(env, key, bytes, contentType);
 }
 
 // ----------------------------------------------------------------- EDITOR
