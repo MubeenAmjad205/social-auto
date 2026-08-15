@@ -24,6 +24,7 @@ import { renderCarousel, type Slide, type SlideKind } from './carousel';
 import { svgToPng } from './rasterize';
 import { sendCarouselForApproval, notify } from './telegram';
 import { uploadToCloudinary } from './cloudinary-storage';
+import { extractAiText } from './util';
 
 const SLIDE_SHAPE: SlideKind[] = ['cover', 'point', 'point', 'point', 'example', 'takeaway', 'cta'];
 
@@ -149,19 +150,14 @@ async function writeCarousel(env: Env, seed: Seed, facts: Fact[]): Promise<Slide
       { role: 'system', content: system },
       { role: 'user', content: `WHAT I DID: ${seed.note}\nANGLE: ${seed.angle ?? 'pick the most useful takeaway'}${sources}` },
     ],
-    // gpt-oss-20b is a reasoning model — it can spend its entire max_tokens
-    // budget on internal chain-of-thought and emit zero final-answer text if
-    // the ceiling is too tight (confirmed: this was landing at raw length 0,
-    // not malformed JSON). Generously oversized on purpose; actual neuron
-    // cost tracks what the model really outputs, not this ceiling.
     max_tokens: 2000,
   });
 
-  const raw = (res.response ?? res.result?.response ?? '').trim();
-  return parseSlides(env, raw, seed);
+  const raw = extractAiText(res);
+  return parseSlides(env, raw, seed, res);
 }
 
-async function parseSlides(env: Env, raw: string, seed: Seed): Promise<Slide[]> {
+async function parseSlides(env: Env, raw: string, seed: Seed, fullRes?: unknown): Promise<Slide[]> {
   try {
     const match = raw.match(/\[[\s\S]*\]/);
     const parsed = JSON.parse(match ? match[0] : raw);
@@ -175,19 +171,22 @@ async function parseSlides(env: Env, raw: string, seed: Seed): Promise<Slide[]> 
     // Valid JSON, wrong shape (too few slides, or not an array) — this and
     // the catch below both used to fail silently into fallbackCarousel with
     // no trace of WHY, which is how "why does every carousel look like the
-    // generic template" went undiagnosed. Surface the actual model output —
-    // plain text, NOT markdown (raw model output routinely contains
-    // unbalanced `_ * [ ]` that 400 Telegram's legacy Markdown parser and
-    // silently drop the whole message) — and also console.log it so
-    // `wrangler tail` catches it even if Telegram delivery itself fails.
-    const msg = `⚠️ Carousel Writer returned ${Array.isArray(parsed) ? `only ${parsed.length} slide(s)` : 'a non-array'} (raw length ${raw.length}) — falling back to the generic template.\n\nRaw output:\n${raw.slice(0, 800) || '(empty)'}`;
+    // generic template" went undiagnosed. Surface the ENTIRE raw API
+    // response, not just the extracted text field — if there's an error,
+    // safety-filter flag, or different response shape than expected,
+    // res.response alone hides it. Plain text, NOT markdown (raw output
+    // routinely contains unbalanced `_ * [ ]` that 400 Telegram's legacy
+    // Markdown parser and silently drop the whole message).
+    const dump = JSON.stringify(fullRes, null, 2).slice(0, 1200);
+    const msg = `⚠️ Carousel Writer returned ${Array.isArray(parsed) ? `only ${parsed.length} slide(s)` : 'a non-array'} (extracted text length ${raw.length}) — falling back to the generic template.\n\nFULL raw API response:\n${dump}`;
     console.error(msg);
     await notify(env, msg, { markdown: false });
   } catch (err: any) {
     // Malformed model output — fall through to the deterministic fallback.
     // Same principle as the LinkedIn Writer's empty-facts rule: degrade to
     // something honest and simple rather than retry into more invention.
-    const msg = `⚠️ Carousel Writer output wasn't valid JSON (${err?.message ?? err}, raw length ${raw.length}) — falling back to the generic template.\n\nRaw output:\n${raw.slice(0, 800) || '(empty)'}`;
+    const dump = JSON.stringify(fullRes, null, 2).slice(0, 1200);
+    const msg = `⚠️ Carousel Writer output wasn't valid JSON (${err?.message ?? err}, extracted text length ${raw.length}) — falling back to the generic template.\n\nFULL raw API response:\n${dump}`;
     console.error(msg);
     await notify(env, msg, { markdown: false });
   }

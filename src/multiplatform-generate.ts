@@ -29,6 +29,7 @@ import { enabledTextPlatforms, type TextPlatform } from './platforms';
 import { fitBlueskyText } from './bluesky';
 import { fitThreadsText } from './threads';
 import { fitMastodonText } from './mastodon';
+import { extractAiText } from './util';
 
 const CHAR_LIMITS: Record<TextPlatform, number> = {
   linkedin: 3000,
@@ -213,5 +214,5 @@ async function writeShortForm(env: Env, seed: Seed, facts: Fact[], platform: Tex
     max_tokens: 300,
   });
 
-  return (res.response ?? res.result?.response ?? '').trim();
+  return extractAiText(res);
 }

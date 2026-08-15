@@ -211,6 +211,22 @@ export default {
         }
       }
 
+      // Isolates whether TEXT_MODEL itself is broken (returns nothing for
+      // even a trivial prompt) vs. something specific to the carousel's
+      // longer system prompt — see the "raw length 0" mystery this is
+      // chasing down.
+      if (url.pathname.startsWith('/run/test-llm/') && request.method === 'GET') {
+        const secret = url.pathname.split('/')[3] ?? '';
+        if (!timingSafeEqual(secret, env.WEBHOOK_SECRET)) return new Response('not found', { status: 404 });
+        const trivial: any = await env.AI.run(env.TEXT_MODEL as any, {
+          messages: [{ role: 'user', content: 'Say hello in exactly 3 words.' }],
+          max_tokens: 200,
+        });
+        return new Response(JSON.stringify({ text_model: env.TEXT_MODEL, trivial_call_raw: trivial }, null, 2), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       if (url.pathname.startsWith('/run/whoami/') && request.method === 'GET') {
         const secret = url.pathname.split('/')[3] ?? '';
         if (!timingSafeEqual(secret, env.WEBHOOK_SECRET)) return new Response('not found', { status: 404 });

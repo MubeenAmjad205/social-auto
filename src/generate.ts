@@ -12,6 +12,7 @@ import type { Env } from './index';
 import type { Fact, Seed, Store } from './store';
 import { resolveProviderChain, generateImageBytes, type ImageProvider } from './image-providers';
 import { uploadToCloudinary } from './cloudinary-storage';
+import { extractAiText } from './util';
 
 export const BANNED = [
   'delve', 'tapestry', 'navigate the', 'leverage', 'testament to',
@@ -69,16 +70,14 @@ export async function write(env: Env, seed: Seed, facts: Fact[]): Promise<string
       { role: 'system', content: system },
       { role: 'user', content: `WHAT I DID: ${seed.note}\nANGLE: ${seed.angle ?? 'pick the most useful takeaway'}${sources}` },
     ],
-    // gpt-oss-20b is a reasoning model — it can spend its entire max_tokens
-    // budget on internal chain-of-thought and emit zero final-answer text if
-    // the ceiling is too tight (confirmed on the carousel Writer: raw length
-    // 0, not malformed JSON, at max_tokens 700). Generously oversized on
-    // purpose; actual neuron cost tracks what the model really outputs, not
-    // this ceiling.
+    // Generous on purpose — gpt-oss-20b is a reasoning model and emits a
+    // reasoning_content block alongside the real answer (see extractAiText
+    // in src/util.ts); actual neuron cost tracks real output, not this
+    // ceiling, so oversizing it costs nothing when the model doesn't need it.
     max_tokens: 2000,
   });
 
-  return (res.response ?? res.result?.response ?? '').trim();
+  return extractAiText(res);
 }
 
 // ----------------------------------------------------------- ART DIRECTOR
@@ -100,12 +99,9 @@ export async function artDirect(env: Env, post: string): Promise<string> {
       },
       { role: 'user', content: post },
     ],
-    // Same reasoning-model token-budget note as write() above — this prompt
-    // asks for a short final answer, but the model can still burn the whole
-    // budget thinking before it gets there.
     max_tokens: 800,
   });
-  return (res.response ?? res.result?.response ?? '').trim();
+  return extractAiText(res);
 }
 
 // ------------------------------------------------------------------ IMAGE

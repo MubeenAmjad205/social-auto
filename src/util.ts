@@ -23,3 +23,18 @@ export function bytesToB64(bytes: Uint8Array): string {
   for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
   return btoa(s);
 }
+
+/**
+ * Workers AI text models don't share one response shape. Cloudflare's own
+ * native models return `{ response: "..." }` (or nested under `.result` on
+ * some SDK versions); @cf/openai/gpt-oss-20b — and presumably other
+ * @cf/openai/* models — return OpenAI's chat-completion shape instead,
+ * `{ choices: [{ message: { content: "..." } }] }`. Reading only the first
+ * shape against the second silently extracts undefined -> '' with no error
+ * anywhere: a real response, read from the wrong field, indistinguishable
+ * from the model actually returning nothing. Found the hard way — see the
+ * "raw length 0" trail in src/instagram-generate.ts's history.
+ */
+export function extractAiText(res: any): string {
+  return (res?.response ?? res?.result?.response ?? res?.choices?.[0]?.message?.content ?? '').trim();
+}
