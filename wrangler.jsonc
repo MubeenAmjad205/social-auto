@@ -8,17 +8,17 @@
   // node:tls, both of which workerd now implements. Do not remove it.
   "compatibility_flags": ["nodejs_compat"],
 
-  // Free plan: 5 Cron Triggers per account. All five now used — the "one
-  // spare" docs/02 and docs/07 mention went to Instagram carousel generation
-  // below, since v1.1 is now built rather than deferred.
-  // ALL TIMES ARE UTC. You are UTC+5 (PKT) — subtract 5 from local time.
+  // Free plan: 5 Cron Triggers per account. Still exactly 5, regardless of
+  // how many platforms ENABLED_PLATFORMS turns on below — see src/index.ts's
+  // header comment for how generate/publish got consolidated to make that
+  // true. ALL TIMES ARE UTC. You are UTC+5 (PKT) — subtract 5 from local time.
   "triggers": {
     "crons": [
-      "0 2 * * *",   // 07:00 PKT — generate LinkedIn draft, send to Telegram
-      "0 4 * * *",   // 09:00 PKT — publish approved LinkedIn
+      "0 2 * * *",   // 07:00 PKT — generate every enabled TEXT platform from one seed, send to Telegram
+      "0 4 * * *",   // 09:00 PKT — publish anything approved, every enabled platform
       "0 6 * * *",   // 11:00 PKT — generate Instagram carousel, send to Telegram
-      "0 9 * * *",   // 14:00 PKT — publish approved Instagram
-      "0 22 * * *"   // 03:00 PKT — token health + seed queue check
+      "0 9 * * *",   // 14:00 PKT — publish anything approved, every enabled platform (2nd window, catches Instagram)
+      "0 22 * * *"   // 03:00 PKT — token health + seed queue check, every enabled platform
     ]
   },
 
@@ -50,14 +50,38 @@
     // bump this quarterly and re-test.
     "LINKEDIN_VERSION": "202608",
 
-    // DUMMY — replace with the real workers.dev subdomain (`wrangler whoami`
-    // or the Cloudflare dashboard) once deployed, and register the exact same
-    // URL as the OAuth redirect on the LinkedIn app.
-    "LINKEDIN_REDIRECT_URI": "https://REPLACE-ME-social-worker.workers.dev/auth/linkedin/callback",
+    // TEMPORARY — pointed at a local ngrok tunnel for OAuth testing against
+    // `wrangler dev` (ngrok http 8787). Free-tier ngrok URLs change every
+    // time the tunnel restarts — when that happens, update this AND the
+    // matching redirect URL registered on the LinkedIn app, and re-run
+    // `wrangler dev`. Switch to the real workers.dev URL from `wrangler
+    // deploy` (`wrangler whoami`) once you're done testing locally.
+    "LINKEDIN_REDIRECT_URI": "https://89d5-163-61-128-174.ngrok-free.app/auth/linkedin/callback",
 
-    // DUMMY — same subdomain as above, registered as the OAuth redirect URI
-    // on the Instagram product's API setup screen in the Meta App dashboard.
-    "INSTAGRAM_REDIRECT_URI": "https://REPLACE-ME-social-worker.workers.dev/auth/instagram/callback",
+    // Same ngrok tunnel, registered on the Instagram product's API setup
+    // screen in the Meta App dashboard (docs/setup/instagram.md step 4).
+    "INSTAGRAM_REDIRECT_URI": "https://89d5-163-61-128-174.ngrok-free.app/auth/instagram/callback",
+
+    // Same ngrok tunnel again, registered on the Threads product added to
+    // the SAME Meta App as Instagram. See docs/setup/threads.md.
+    "THREADS_REDIRECT_URI": "https://89d5-163-61-128-174.ngrok-free.app/auth/threads/callback",
+
+    // Comma-separated, no spaces needed. Default matches this project's
+    // original behavior exactly — add "bluesky", "threads", "mastodon" as
+    // you set each one up. A platform absent here costs nothing: no cron
+    // work, no secrets required, no Telegram messages. See src/platforms.ts.
+    "ENABLED_PLATFORMS": "linkedin,instagram",
+
+    // Mastodon is federated — there's no single API host. Whatever server
+    // your account lives on. See docs/setup/mastodon.md.
+    "MASTODON_INSTANCE_URL": "https://REPLACE-ME.example.social",
+    // Optional. Mastodon's default is 500; some instances allow more.
+    "MASTODON_MAX_CHARS": "500",
+
+    // Optional — destination address for the email fallback (src/email.ts).
+    // Leave blank to leave the fallback off entirely; notify() still works
+    // via Telegram either way, this only matters if Telegram itself fails.
+    "ALERT_EMAIL_TO": "",
 
     // See docs/09-resources.md for the neuron math behind these.
     "IMAGE_MODEL": "@cf/black-forest-labs/flux-2-klein-4b",

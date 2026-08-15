@@ -1,42 +1,59 @@
 # social-worker
 
-An assisted LinkedIn + Instagram publishing pipeline for a solo Gen AI / ML
-engineer. Cloudflare Workers, MongoDB Atlas, Telegram approval. Runs on free
-tiers. Never publishes without a tap on your phone.
+An assisted publishing pipeline for a solo Gen AI / ML engineer's public
+presence — LinkedIn, Instagram, Bluesky, Threads, Mastodon, each toggled
+independently. Cloudflare Workers, MongoDB Atlas, Telegram approval. Runs
+on free tiers. Never publishes without a tap on your phone.
 
 **Full documentation:** [`docs/`](docs/) — read [`docs/README.md`](docs/README.md) first.
 Docs describe the original v1 design (LinkedIn only, Instagram deferred to
-v1.1). **The Instagram carousel pipeline described there as deferred has
-since been built** — see "Status vs. the docs" below for exactly what
-changed and the trade-offs that came with it.
+v1.1, no other platforms). **Instagram's carousel pipeline and three more
+platforms have since been built** — see "Status vs. the docs" below for
+exactly what changed and the trade-offs that came with it.
 
-**Platform setup, step by step:** [`docs/setup/`](docs/setup/) — do them in
-this order:
+**Platform setup, step by step:** [`docs/setup/`](docs/setup/):
 1. [`docs/setup/linkedin.md`](docs/setup/linkedin.md) — Company Page, dev app, products, OAuth
-2. [`docs/setup/facebook.md`](docs/setup/facebook.md) — the Meta Developer App that hosts Instagram's API (this project never publishes to Facebook itself)
+2. [`docs/setup/facebook.md`](docs/setup/facebook.md) — the Meta Developer App that hosts Instagram's and Threads' APIs (this project never publishes to Facebook itself)
 3. [`docs/setup/instagram.md`](docs/setup/instagram.md) — Professional account, permissions, `/auth/instagram`
+4. [`docs/setup/threads.md`](docs/setup/threads.md) — same Meta App, add the Threads product, `/auth/threads`
+5. [`docs/setup/bluesky.md`](docs/setup/bluesky.md) — an app password, no OAuth flow at all
+6. [`docs/setup/mastodon.md`](docs/setup/mastodon.md) — a static token generated once in your instance's UI, no OAuth flow
+7. [`docs/setup/email.md`](docs/setup/email.md) — optional last-resort alert channel if Telegram itself ever fails to deliver
+
+Every platform above is off by default except LinkedIn and Instagram
+(`ENABLED_PLATFORMS` in `wrangler.jsonc`) — set up only the ones you want.
 
 ## Layout
 
 ```
-wrangler.jsonc            bindings, crons, vars, wasm/font bundler rules
-spike/atlas-check.ts      RUN THIS FIRST — proves or kills the all-Atlas plan
-assets/Inter-*.ttf        embedded fonts for carousel text rendering
-src/index.ts              cron dispatch, OAuth routes, Telegram webhook
-src/store.ts              MongoStore — the only data layer
-src/secrets.ts            AES-GCM token encryption at rest
-src/errors.ts             ambiguous-vs-clean publish failure classification
-src/research.ts           the Researcher agent (shared by both platforms)
-src/generate.ts           LinkedIn: Writer + Art Director + Editor + FLUX image
-src/carousel.ts           Instagram: SVG slide template generator
-src/rasterize.ts          Instagram: SVG -> PNG via resvg-wasm
-src/instagram-generate.ts Instagram: Carousel Writer + generation pipeline
-src/linkedin.ts           OAuth + publish
-src/instagram.ts          OAuth + token refresh + publish, incl. real carousel container flow
-src/telegram.ts           approval gate — single-image and carousel drafts
-src/migrate.ts            one-time index creation
-docs/                     the nine original design docs — read in order
-docs/setup/                platform-by-platform setup guides
+wrangler.jsonc              bindings, crons, vars, wasm/font bundler rules
+spike/atlas-check.ts        RUN THIS FIRST — proves or kills the all-Atlas plan
+assets/Inter-*.ttf          embedded fonts for carousel text rendering
+src/index.ts                cron dispatch, OAuth routes, Telegram webhook
+src/store.ts                MongoStore — the only data layer
+src/secrets.ts              AES-GCM token encryption at rest
+src/errors.ts               ambiguous-vs-clean publish failure classification
+src/util.ts                 shared base64 helpers
+src/platforms.ts            ENABLED_PLATFORMS parsing — the on/off switch for everything below
+src/research.ts             the Researcher agent (shared by every platform)
+src/generate.ts             Writer/Art-Director/Editor/image toolkit (LinkedIn's shape; reused by others)
+src/multiplatform-generate.ts  one seed, one research pass, one image -> N platform-voiced drafts
+src/image-providers.ts      optional FLUX alternatives: Pollinations, Gemini 2.5 Flash Image
+src/carousel.ts             Instagram: SVG slide template generator
+src/rasterize.ts            Instagram: SVG -> PNG via resvg-wasm
+src/instagram-generate.ts   Instagram: Carousel Writer + generation pipeline
+src/linkedin.ts             OAuth + publish
+src/instagram.ts            OAuth + token refresh + publish, real carousel container flow
+src/threads.ts              OAuth + token refresh + publish
+src/bluesky.ts              app-password session + publish, no stored token
+src/mastodon.ts             static-token publish, no OAuth flow at all
+src/email.ts                optional Gmail SMTP fallback if Telegram delivery fails
+src/casestudy.ts            on-demand Company Page case-study writer (/casestudy)
+src/rss.ts                  GET /feed.xml — public read-only archive feed
+src/telegram.ts             approval gate — every platform, single-image and carousel drafts
+src/migrate.ts              one-time index creation
+docs/                       the nine original design docs — read in order
+docs/setup/                  platform-by-platform setup guides
 ```
 
 ## Status vs. the docs — what's built beyond v1
@@ -92,6 +109,59 @@ Update: the font-family risk above is now resolved rather than open —
 name table, ID 1) and is exactly `"Inter"` in both weights, matching what
 `src/carousel.ts` and `src/rasterize.ts` request. Text rendering should not
 silently fail on a name mismatch.
+
+## Multi-platform expansion — Bluesky, Threads, Mastodon, email, more
+
+Three more platforms, an optional email fallback, a client case-study
+generator, and a public RSS feed, all added after the docs and all off by
+default except the two that shipped with v1.
+
+- **The free plan's 5-Cron-Trigger cap forced a real redesign, not just an
+  add-on.** The docs' own layout already used all 5 slots. Adding
+  Bluesky/Threads/Mastodon the naive way (a generate + publish cron each)
+  would have needed 11. Instead, `src/multiplatform-generate.ts` pulls
+  **one seed**, runs the Researcher **once**, renders **one shared image**,
+  and writes an independent, platform-voiced post for every platform in
+  `ENABLED_PLATFORMS` — still exactly 5 crons regardless of how many
+  platforms are on. This is also, not incidentally, what docs/03 describes
+  as the intended design and what the original build never actually did:
+  "the shared asset is the seed, not the post."
+- **This directly serves seed-queue health**, the docs' own stated top
+  risk ("High likelihood, Fatal in practice"). One seed now produces posts
+  for every enabled text platform instead of each platform draining its
+  own — the opposite of what naively bolting on 3 more platforms would
+  have done.
+- **Cross-posting identical text was never on the table** — docs/01 lists
+  it as an explicit non-goal ("performs worse on both"). Bluesky, Threads,
+  and Mastodon each get their own Writer call, sized and voiced for that
+  platform, not LinkedIn's text pasted elsewhere.
+- **Bluesky and Mastodon need no OAuth flow at all** — Bluesky
+  re-authenticates with an app password on every publish (no token to
+  expire), Mastodon uses a token generated once in your instance's own
+  settings UI. Threads mirrors Instagram's OAuth pattern exactly (same
+  Meta App, same CSRF-cookie guard), since it's the same platform family.
+- **`notify()` no longer assumes Telegram succeeded.** It now checks the
+  response and falls back to email (`src/email.ts`) if the send itself
+  failed — closing a real gap where Telegram, the entire monitoring
+  channel, had no fallback if it was the thing that broke. Plain
+  `nodemailer` doesn't work in Workers (no raw TCP, even with
+  `nodejs_compat`); this uses `worker-mailer`, built on `cloudflare:sockets`,
+  instead. **Every part of this is optional and fails silently closed** —
+  unset `GMAIL_USER`/`GMAIL_APP_PASSWORD`/`ALERT_EMAIL_TO` and `notify()`
+  behaves exactly as it always did.
+- **`/casestudy <description>`** writes a Company Page–voiced post from a
+  delivered project. It does not publish anywhere — Company Page
+  publishing needs Marketing Developer Platform approval this project
+  doesn't have (docs/06) — the text comes back over Telegram to paste in
+  yourself.
+- **`GET /feed.xml`** is a public, unauthenticated RSS 2.0 feed of
+  everything ever published, across every platform, straight from the
+  `posts` archive that already existed.
+- **Unverified, same honesty policy as everything else in this project:**
+  Threads' exact endpoints haven't been exercised against a real account
+  (flagged in `src/threads.ts`); Bluesky's and Threads' character limits
+  are enforced via Unicode code-point counting, not true grapheme
+  segmentation (a heuristic, not a bug — see `src/bluesky.ts`).
 
 ## Hardening pass — bugs found and fixed after the initial build
 

@@ -15,7 +15,8 @@
   },
   "dependencies": {
     "@resvg/resvg-wasm": "^2.6.2",
-    "mongodb": "^7.5.0"
+    "mongodb": "^7.5.0",
+    "worker-mailer": "^1.2.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260814.1",

@@ -13,7 +13,7 @@
 import { MongoClient, Db } from 'mongodb';
 import { seal, open, Sealed } from './secrets';
 
-export type Platform = 'linkedin' | 'instagram';
+export type Platform = 'linkedin' | 'instagram' | 'bluesky' | 'threads' | 'mastodon';
 export type Status = 'pending' | 'approved' | 'rejected' | 'published' | 'failed';
 export type SeedKind = 'own' | 'client';
 
@@ -85,6 +85,7 @@ export interface Store {
   logRun(r: unknown): Promise<void>;
   lastRun(): Promise<any | null>;
   recordPost(p: unknown): Promise<void>;
+  listPosts(limit: number): Promise<any[]>;
   seenSource(url: string): Promise<boolean>;
   markSourceSeen(s: { url: string; title: string; source_name: string }): Promise<void>;
 
@@ -298,6 +299,11 @@ export class MongoStore implements Store {
   async recordPost(p: unknown): Promise<void> {
     const db = await this.conn();
     await db.collection('posts').insertOne(p as any);
+  }
+
+  async listPosts(limit: number): Promise<any[]> {
+    const db = await this.conn();
+    return db.collection('posts').find({}).sort({ published_at: -1 }).limit(limit).toArray();
   }
 
   async seenSource(url: string): Promise<boolean> {
