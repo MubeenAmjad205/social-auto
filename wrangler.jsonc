@@ -39,33 +39,30 @@
     // R2 needed a Cloudflare billing profile (a card) just to activate;
     // Cloudinary needs none. See src/cloudinary-storage.ts and
     // docs/setup/cloudinary.md.
-    "CLOUDINARY_CLOUD_NAME": "REPLACE-ME-your-cloud-name",
+    "CLOUDINARY_CLOUD_NAME": "jggs5zvn",
 
     // Mandatory on /rest/* calls. Versions are sunset on a rolling basis —
     // bump this quarterly and re-test.
     "LINKEDIN_VERSION": "202608",
 
-    // TEMPORARY — pointed at a local ngrok tunnel for OAuth testing against
-    // `wrangler dev` (ngrok http 8787). Free-tier ngrok URLs change every
-    // time the tunnel restarts — when that happens, update this AND the
-    // matching redirect URL registered on the LinkedIn app, and re-run
-    // `wrangler dev`. Switch to the real workers.dev URL from `wrangler
-    // deploy` (`wrangler whoami`) once you're done testing locally.
-    "LINKEDIN_REDIRECT_URI": "https://89d5-163-61-128-174.ngrok-free.app/auth/linkedin/callback",
+    // The real, permanent workers.dev URL (from `wrangler deploy`) — no more
+    // ngrok URL rotation to chase. Must be registered as an allowed OAuth
+    // redirect on the LinkedIn app's dashboard too, exact string match.
+    "LINKEDIN_REDIRECT_URI": "https://social-worker.mianmubeen205.workers.dev/auth/linkedin/callback",
 
-    // Same ngrok tunnel, registered on the Instagram product's API setup
+    // Same permanent URL, registered on the Instagram product's API setup
     // screen in the Meta App dashboard (docs/setup/instagram.md step 4).
-    "INSTAGRAM_REDIRECT_URI": "https://89d5-163-61-128-174.ngrok-free.app/auth/instagram/callback",
+    "INSTAGRAM_REDIRECT_URI": "https://social-worker.mianmubeen205.workers.dev/auth/instagram/callback",
 
-    // Same ngrok tunnel again, registered on the Threads product added to
+    // Same permanent URL again, registered on the Threads product added to
     // the SAME Meta App as Instagram. See docs/setup/threads.md.
-    "THREADS_REDIRECT_URI": "https://89d5-163-61-128-174.ngrok-free.app/auth/threads/callback",
+    "THREADS_REDIRECT_URI": "https://social-worker.mianmubeen205.workers.dev/auth/threads/callback",
 
     // Comma-separated, no spaces needed. Default matches this project's
     // original behavior exactly — add "bluesky", "threads", "mastodon" as
     // you set each one up. A platform absent here costs nothing: no cron
     // work, no secrets required, no Telegram messages. See src/platforms.ts.
-    "ENABLED_PLATFORMS": "linkedin,instagram",
+    "ENABLED_PLATFORMS": "instagram",
 
     // Mastodon is federated — there's no single API host. Whatever server
     // your account lives on. See docs/setup/mastodon.md.
@@ -82,14 +79,19 @@
     "IMAGE_MODEL": "@cf/black-forest-labs/flux-2-klein-4b",
     "TEXT_MODEL": "@cf/openai/gpt-oss-20b",
 
-    // Optional swap for the LinkedIn post image — see src/image-providers.ts.
-    // "workers-ai" (default): FLUX.2 above, costs Workers AI neurons, supports
-    //   style_refs for visual consistency across posts.
-    // "pollinations": free, no API key at all, but no style_refs and may
+    // Comma-separated FALLBACK CHAIN, tried in order — see
+    // src/image-providers.ts. If the first one throws (quota, outage,
+    // missing key) the next is tried automatically; this only fails if
+    // every provider in the list fails. A single value works too.
+    // "workers-ai": FLUX.2, costs Workers AI neurons (~104/image of 10k/day
+    //   free), the only one with style_refs (visual consistency across posts).
+    // "gemini": free (~500 images/day), needs a GEMINI_API_KEY secret — if
+    //   unset it fails fast and the chain moves on. Generally higher quality
+    //   than FLUX schnell/klein, zero neuron cost, no style_refs.
+    // "pollinations": free, no API key at all, effectively unlimited — best
+    //   last resort since it has the fewest ways to fail. No style_refs, may
     //   carry a small watermark on anonymous requests.
-    // "gemini": free (~500 images/day), needs a GEMINI_API_KEY secret, no
-    //   style_refs, generally higher quality than FLUX schnell/klein.
-    "IMAGE_PROVIDER": "workers-ai",
+    "IMAGE_PROVIDER": "workers-ai,gemini,pollinations",
 
     "MONGODB_DB": "social"
   }
@@ -115,8 +117,10 @@
   //                          Generated once in your instance's Settings -> Development.
   //   CLOUDINARY_API_KEY     From the Cloudinary dashboard home page, next to CLOUDINARY_CLOUD_NAME
   //   CLOUDINARY_API_SECRET  above. Used for signed uploads — see src/cloudinary-storage.ts.
-  //   GEMINI_API_KEY         OPTIONAL — only needed if IMAGE_PROVIDER is set to "gemini"
-  //                          above. Free, no card: aistudio.google.com/apikey
+  //   GEMINI_API_KEY         OPTIONAL — only needed if "gemini" appears in the
+  //                          IMAGE_PROVIDER chain above. Free, no card: aistudio.google.com/apikey.
+  //                          Leaving it blank is safe — that provider just fails fast
+  //                          and the chain falls through to the next one.
   //   GMAIL_USER             OPTIONAL — email fallback if Telegram delivery fails. Both
   //   GMAIL_APP_PASSWORD     blank = fallback off entirely. See docs/setup/email.md.
   //   GITHUB_PAT             only used for search rate limits now (src/research.ts) —
