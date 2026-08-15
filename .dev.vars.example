@@ -3,7 +3,7 @@
 #
 # These are SECRETS -> in production they go via `wrangler secret put` (or
 # `wrangler secret bulk secrets.json`, see secrets.example.json), never in
-# wrangler.jsonc. Non-secret vars (GITHUB_MEDIA_REPO, LINKEDIN_VERSION,
+# wrangler.jsonc. Non-secret vars (CLOUDINARY_CLOUD_NAME, LINKEDIN_VERSION,
 # LINKEDIN_REDIRECT_URI, INSTAGRAM_REDIRECT_URI, THREADS_REDIRECT_URI,
 # ENABLED_PLATFORMS, MASTODON_INSTANCE_URL, MASTODON_MAX_CHARS,
 # ALERT_EMAIL_TO, IMAGE_MODEL, TEXT_MODEL, MONGODB_DB) already live in
@@ -44,6 +44,12 @@ BLUESKY_APP_PASSWORD=
 # ENABLED_PLATFORMS. See docs/setup/mastodon.md.
 MASTODON_ACCESS_TOKEN=
 
+# Cloudinary dashboard home page, next to CLOUDINARY_CLOUD_NAME (a var in
+# wrangler.jsonc, not here — it's not sensitive). Hosts every generated
+# image, replacing R2. See docs/setup/cloudinary.md and src/cloudinary-storage.ts.
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
+
 # OPTIONAL — only needed if IMAGE_PROVIDER is set to "gemini" in
 # wrangler.jsonc (default is "workers-ai", which needs none of this).
 # Free, no card: aistudio.google.com/apikey. See src/image-providers.ts.
@@ -56,11 +62,8 @@ GEMINI_API_KEY=
 GMAIL_USER=
 GMAIL_APP_PASSWORD=
 
-# GitHub personal access token — TWO jobs now: raises the search API limit
-# 60/hr -> 5,000/hr (src/research.ts), AND hosts every generated image
-# (src/github-storage.ts, replacing R2 — see docs/setup/github-media.md).
-# Needs `contents:write` (fine-grained) or the classic `repo` scope — a
-# read-only token from before image hosting existed needs re-generating.
+# GitHub personal access token — raises the search API limit 60/hr -> 5,000/hr
+# (src/research.ts). Read-only is fine; it doesn't host images (Cloudinary does).
 GITHUB_PAT=
 
 # https://app.tavily.com — 1,000 free credits/month, no card required.

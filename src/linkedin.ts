@@ -9,7 +9,7 @@
 import type { Env } from './index';
 import type { Store, Draft } from './store';
 import { fetchOrAmbiguous } from './errors';
-import { fetchGitHubMedia } from './github-storage';
+import { fetchMedia } from './cloudinary-storage';
 
 const AUTH = 'https://www.linkedin.com/oauth/v2/authorization';
 const TOKEN = 'https://www.linkedin.com/oauth/v2/accessToken';
@@ -115,11 +115,11 @@ export async function publishLinkedIn(env: Env, store: Store, draft: Draft): Pro
   if (!init.ok) throw new Error(`initializeUpload ${init.status}: ${await init.text()}`);
   const { value } = await init.json<{ value: { uploadUrl: string; image: string } }>();
 
-  // 2. Stream the bytes from GitHub (draft.image_key is a public URL — see
+  // 2. Stream the bytes from Cloudinary (draft.image_key is a public URL — see
   // src/generate.ts's renderImage) straight into LinkedIn's upload — no
   // buffering, no CPU cost. R2's free binding read is gone; this is a real
   // subrequest now, but it's one call, trivial against the 50/invocation budget.
-  const media = await fetchGitHubMedia(draft.image_key!);
+  const media = await fetchMedia(draft.image_key!);
   if (!media?.body) throw new Error(`media fetch failed: ${draft.image_key}`);
 
   const put = await fetch(value.uploadUrl, {

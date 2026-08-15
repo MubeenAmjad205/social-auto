@@ -33,13 +33,13 @@ import { renderRssFeed } from './rss';
 export interface Env {
   AI: Ai;
 
-  // No R2 binding — image storage moved to GitHub (src/github-storage.ts).
+  // No R2 binding — image storage is Cloudinary (src/cloudinary-storage.ts).
   // R2 requires a Cloudflare billing profile (a card on file) to activate
   // at all, and turns out, once traced through every code path, to have no
   // remaining necessary role once the shared image + carousel slides +
   // style_refs (which just point at a previous draft's image) all live on
-  // GitHub instead. One less thing needing a card anywhere in this stack.
-  GITHUB_MEDIA_REPO: string; // "owner/repo" — a small DEDICATED public repo, not the code repo
+  // Cloudinary instead. No card anywhere in this stack for any of it.
+  CLOUDINARY_CLOUD_NAME: string; // not sensitive — it's part of every delivery URL anyway
 
   LINKEDIN_VERSION: string;
   LINKEDIN_REDIRECT_URI: string;
@@ -65,13 +65,12 @@ export interface Env {
   BLUESKY_HANDLE: string;
   BLUESKY_APP_PASSWORD: string;
   MASTODON_ACCESS_TOKEN: string;
+  CLOUDINARY_API_KEY: string;
+  CLOUDINARY_API_SECRET: string;
   GEMINI_API_KEY: string; // optional — only required when IMAGE_PROVIDER=gemini
   GMAIL_USER: string; // optional — email fallback, no-ops if unset (src/email.ts)
   GMAIL_APP_PASSWORD: string; // optional
-  // Needs contents:write (fine-grained) or the classic `repo` scope now —
-  // read-only search access isn't enough to push image commits. See
-  // docs/setup/github-media.md if your existing PAT was created read-only.
-  GITHUB_PAT: string;
+  GITHUB_PAT: string; // read-only is fine — only used for search rate limits (src/research.ts)
   TAVILY_API_KEY: string;
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_CHAT_ID: string;

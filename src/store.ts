@@ -37,8 +37,8 @@ export interface Draft {
   platform: Platform;
   status: Status;
   body: string;
-  // Despite the field name, these are public URLs (GitHub-hosted — see
-  // src/github-storage.ts), not object-storage keys. Named before R2 was
+  // Despite the field name, these are public URLs (Cloudinary-hosted — see
+  // src/cloudinary-storage.ts), not object-storage keys. Named before R2 was
   // replaced; kept for schema stability rather than a cosmetic rename.
   image_key: string | null;       // the shared image (LinkedIn/Bluesky/Threads/Mastodon); Instagram's cover slide
   image_keys: string[] | null;    // Instagram carousel: every slide's URL, in order. null for non-carousel drafts.
@@ -259,7 +259,7 @@ export class MongoStore implements Store {
   }
 
   // -------------------------------------------------------------- style
-  // image_key here is a public URL (GitHub-hosted), same as on Draft — see
+  // image_key here is a public URL (Cloudinary-hosted), same as on Draft — see
   // the comment on Draft.image_key above.
 
   async activeStyleRefs(): Promise<string[]> {

@@ -145,7 +145,7 @@ export async function generateTextPlatforms(env: Env, store: Store, ctx: Executi
       await sendDraftForApproval(env, {
         id, platform: p, body, flags,
         sourceCount: facts.length,
-        imageUrl: imageKey, // already a public URL (GitHub-hosted) — see src/generate.ts's renderImage
+        imageUrl: imageKey, // already a public URL (Cloudinary-hosted) — see src/generate.ts's renderImage
       });
     }
 

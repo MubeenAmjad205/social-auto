@@ -12,7 +12,7 @@ platforms have since been built** — see "Status vs. the docs" below for
 exactly what changed and the trade-offs that came with it.
 
 **Platform setup, step by step:** [`docs/setup/`](docs/setup/):
-1. [`docs/setup/github-media.md`](docs/setup/github-media.md) — **do this first**, every other platform needs it: a public GitHub repo hosts every generated image now, replacing R2 entirely
+1. [`docs/setup/cloudinary.md`](docs/setup/cloudinary.md) — **do this first**, every other platform needs it: Cloudinary hosts every generated image now, replacing R2 entirely
 2. [`docs/setup/linkedin.md`](docs/setup/linkedin.md) — Company Page, dev app, products, OAuth
 3. [`docs/setup/facebook.md`](docs/setup/facebook.md) — the Meta Developer App that hosts Instagram's and Threads' APIs (this project never publishes to Facebook itself)
 4. [`docs/setup/instagram.md`](docs/setup/instagram.md) — Professional account, permissions, `/auth/instagram`
@@ -39,7 +39,7 @@ src/errors.ts               ambiguous-vs-clean publish failure classification
 src/util.ts                 shared base64 helpers
 src/platforms.ts            ENABLED_PLATFORMS parsing — the on/off switch for everything below
 src/research.ts             the Researcher agent (shared by every platform)
-src/github-storage.ts       image hosting — replaces R2, no billing profile needed anywhere
+src/cloudinary-storage.ts   image hosting — replaces R2, no billing profile needed anywhere
 src/generate.ts             Writer/Art-Director/Editor/image toolkit (LinkedIn's shape; reused by others)
 src/multiplatform-generate.ts  one seed, one research pass, one image -> N platform-voiced drafts
 src/image-providers.ts      optional FLUX alternatives: Pollinations, Gemini 2.5 Flash Image
@@ -173,29 +173,35 @@ Every doc, and this README until now, described Cloudflare R2 as the media
 store. **It's gone.** R2 is the one component in this whole stack that
 needs a Cloudflare billing profile (a card on file) just to activate — and
 unlike everything else here, it's genuine pay-as-you-go beyond the free
-tier, not a hard-capped sandbox. `src/github-storage.ts` replaces it:
-every generated image is hosted via a dedicated public GitHub repo instead,
-reusing the `GITHUB_PAT` secret already required for search. No card
-anywhere in this project, for anything, as shipped.
+tier, not a hard-capped sandbox. `src/cloudinary-storage.ts` replaces it:
+every generated image is hosted via Cloudinary instead — verified before
+switching, not assumed: Cloudinary's free plan needs no card either, and
+fails the same way (warnings, then account disable) rather than billing
+automatically past the free tier. (A GitHub-repo-based approach was tried
+first and works fine technically, but Cloudinary is the purpose-built tool
+for this job rather than repurposing a git host — swapped before ever
+shipping the GitHub version to production.)
 
-This wasn't a planned trade — it fell out of actually tracing the code:
-`style_refs` (the multi-reference visual-consistency feature) just point at
-a *previous* draft's image. Once that image lives on GitHub instead of R2,
-the reference has to follow it there too — which meant R2 ended up with
-nothing left to do. Keeping a half-used R2 binding around "just in case"
-would have been worse than removing it: dead config protecting nothing.
+This wasn't originally a planned full removal of R2 — it fell out of
+actually tracing the code: `style_refs` (the multi-reference visual-
+consistency feature) just point at a *previous* draft's image. Once that
+image lives off R2, the reference has to follow it there too — which meant
+R2 ended up with nothing left to do. Keeping a half-used R2 binding around
+"just in case" would have been worse than removing it: dead config
+protecting nothing.
 
 Two things this adds beyond just removing the risk:
 - **A hard, self-imposed safety ceiling**, checked before every upload via
-  GitHub's own repo-size API (`src/github-storage.ts`) — refuses and alerts
-  via Telegram if the media repo ever crosses 500MB, ~30x this project's
-  expected usage. Not a monitoring dashboard you have to remember to check;
-  a check that runs on every write.
+  Cloudinary's own usage API (`src/cloudinary-storage.ts`) — refuses and
+  alerts via Telegram once usage crosses 80% of the free plan's monthly
+  credits, itself already ~30x this project's expected usage. Not a
+  monitoring dashboard you have to remember to check; a check that runs on
+  every write.
 - `draft.image_key` / `draft.image_keys` in Atlas keep their field names
   (schema stability) but now hold full public URLs, not object-storage
   keys — worth knowing if you're inspecting the `drafts` collection directly.
 
-See [`docs/setup/github-media.md`](docs/setup/github-media.md) for setup —
+See [`docs/setup/cloudinary.md`](docs/setup/cloudinary.md) for setup —
 it's now the first thing to configure, since every platform's image path
 depends on it.
 
@@ -277,7 +283,7 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<worker>/tg/<WE
 # visit https://<worker>/auth/instagram in a browser, click Allow
 ```
 
-`GITHUB_MEDIA_REPO`, `LINKEDIN_VERSION`, `LINKEDIN_REDIRECT_URI`,
+`CLOUDINARY_CLOUD_NAME`, `LINKEDIN_VERSION`, `LINKEDIN_REDIRECT_URI`,
 `INSTAGRAM_REDIRECT_URI`, `THREADS_REDIRECT_URI`, `ENABLED_PLATFORMS`,
 `MASTODON_INSTANCE_URL`, `MASTODON_MAX_CHARS`, `ALERT_EMAIL_TO`,
 `IMAGE_MODEL`, `TEXT_MODEL`, `IMAGE_PROVIDER`, `MONGODB_DB` are plain vars,
@@ -296,7 +302,7 @@ actually deploy or run the spike. `grep -rn "REPLACE_ME\|REPLACE-ME" .`
 
 | File | Key(s) | Replace with |
 |---|---|---|
-| `wrangler.jsonc` | `GITHUB_MEDIA_REPO` | `"your-username/social-media"` — a dedicated public repo. See `docs/setup/github-media.md` (**do this one first**) |
+| `wrangler.jsonc` | `CLOUDINARY_CLOUD_NAME` | From the Cloudinary dashboard home page. See `docs/setup/cloudinary.md` (**do this one first**) |
 | `wrangler.jsonc` | `LINKEDIN_REDIRECT_URI` | `https://social-worker.<your-subdomain>.workers.dev/auth/linkedin/callback` — must exactly match the LinkedIn app's registered redirect URL. See `docs/setup/linkedin.md` |
 | `wrangler.jsonc` | `INSTAGRAM_REDIRECT_URI` | Same subdomain, `/auth/instagram/callback` — registered on the Meta App's Instagram product. See `docs/setup/facebook.md` |
 | `wrangler.jsonc` | `THREADS_REDIRECT_URI` | Same subdomain, `/auth/threads/callback`. See `docs/setup/threads.md` |
@@ -307,7 +313,8 @@ actually deploy or run the spike. `grep -rn "REPLACE_ME\|REPLACE-ME" .`
 | `.dev.vars`, `secrets.json` | `THREADS_CLIENT_ID` / `THREADS_CLIENT_SECRET` | Only if `"threads"` is enabled. Same Meta App as Instagram. See `docs/setup/threads.md` |
 | `.dev.vars`, `secrets.json` | `BLUESKY_HANDLE` / `BLUESKY_APP_PASSWORD` | Only if `"bluesky"` is enabled. An app password, not your real password. See `docs/setup/bluesky.md` |
 | `.dev.vars`, `secrets.json` | `MASTODON_ACCESS_TOKEN` | Only if `"mastodon"` is enabled. Generated once in your instance's UI, no OAuth flow. See `docs/setup/mastodon.md` |
-| `.dev.vars`, `secrets.json` | `GITHUB_PAT` | Needs `contents:write` (fine-grained) or classic `repo` scope now — it hosts every image, not just search anymore. See `docs/setup/github-media.md` |
+| `.dev.vars`, `secrets.json` | `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | From the Cloudinary dashboard home page, next to `CLOUDINARY_CLOUD_NAME`. See `docs/setup/cloudinary.md` |
+| `.dev.vars`, `secrets.json` | `GITHUB_PAT` | Read-only is fine — only used for search rate limits, doesn't host images |
 | `.dev.vars`, `secrets.json` | `TAVILY_API_KEY` | app.tavily.com, free tier |
 | `.dev.vars`, `secrets.json` | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | From @BotFather / @userinfobot |
 | `spike/.dev.vars` | `MONGODB_URI` | Same Atlas string as above |
@@ -320,7 +327,7 @@ update both `.dev.vars` and `secrets.json` to match. `GMAIL_USER` /
 blank unless you're using the email fallback or `IMAGE_PROVIDER=gemini`.
 
 There is no R2 bucket to create and no Cloudflare billing profile needed
-anywhere — see `docs/setup/github-media.md` for why and what replaced it.
+anywhere — see `docs/setup/cloudinary.md` for why and what replaced it.
 
 Before any of this: create the LinkedIn Company Page, request "Share on
 LinkedIn", and file the Meta app review for Instagram. See
