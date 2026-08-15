@@ -130,7 +130,20 @@ export class MongoStore implements Store {
   }
 
   async close() {
-    if (this.connected) await this.client.close();
+    if (!this.connected) return;
+    try {
+      await this.client.close();
+    } catch (err) {
+      // A close failure must never override an already-decided response —
+      // every caller does `try { ...; return X } finally { await store.close() }`,
+      // and an exception thrown IN a finally block replaces whatever the try
+      // block already returned. workerd's socket layer can drop an idle
+      // connection out from under the driver (surfacing as
+      // MongoTopologyClosedError on the next close()) — that's a harmless
+      // double-close, not a real failure, so it's swallowed here once rather
+      // than requiring every call site to remember to .catch() its finally.
+      console.error('MongoStore.close() failed (non-fatal):', err);
+    }
   }
 
   // ------------------------------------------------------------- tokens
