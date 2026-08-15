@@ -42,7 +42,7 @@ src/research.ts             the Researcher agent (shared by every platform)
 src/cloudinary-storage.ts   image hosting — replaces R2, no billing profile needed anywhere
 src/generate.ts             Writer/Art-Director/Editor/image toolkit (LinkedIn's shape; reused by others)
 src/multiplatform-generate.ts  one seed, one research pass, one image -> N platform-voiced drafts
-src/image-providers.ts      optional FLUX alternatives: Pollinations, Gemini 2.5 Flash Image
+src/image-providers.ts      image provider FALLBACK CHAIN: Workers AI -> Gemini 2.5 Flash Image -> Pollinations
 src/carousel.ts             Instagram: SVG slide template generator
 src/rasterize.ts            Instagram: SVG -> PNG via resvg-wasm
 src/instagram-generate.ts   Instagram: Carousel Writer + generation pipeline
@@ -324,7 +324,10 @@ values, already usable as-is. Only regenerate them if you specifically want
 to (`openssl rand -base64 32` / `openssl rand -hex 24`), and if you do,
 update both `.dev.vars` and `secrets.json` to match. `GMAIL_USER` /
 `GMAIL_APP_PASSWORD` / `GEMINI_API_KEY` are genuinely optional — leave them
-blank unless you're using the email fallback or `IMAGE_PROVIDER=gemini`.
+blank unless you're using the email fallback or want `gemini` active in the
+`IMAGE_PROVIDER` fallback chain (leaving `GEMINI_API_KEY` blank while
+`gemini` is still listed in the chain is safe — it just fails fast and
+falls through to the next provider, see `src/image-providers.ts`).
 
 There is no R2 bucket to create and no Cloudflare billing profile needed
 anywhere — see `docs/setup/cloudinary.md` for why and what replaced it.

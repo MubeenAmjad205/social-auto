@@ -80,6 +80,50 @@ export interface Env {
 export const storeFor = (env: Env): Store =>
   new MongoStore(env.MONGODB_URI, env.MONGODB_DB, env.TOKEN_KEY);
 
+// Plain `!==` on a secret leaks timing information (how many leading bytes
+// matched) to anyone who can measure response latency at scale. Cheap to
+// avoid: compare every byte regardless of where the first mismatch is,
+// rather than short-circuiting on the first different one.
+function timingSafeEqual(a: string, b: string): boolean {
+  const ab = new TextEncoder().encode(a);
+  const bb = new TextEncoder().encode(b);
+  if (ab.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ab.length; i++) diff |= ab[i] ^ bb[i];
+  return diff === 0;
+}
+
+export type Stage = 'generate' | 'instagram' | 'publish' | 'health';
+
+// Manual pipeline trigger — same effect as waiting for that stage's real
+// cron, just started on demand instead of on the clock. Shared by the
+// /run/<stage>/<secret> HTTP routes AND the Telegram command center
+// (src/telegram.ts's /generate, /instagram, /publish, /health), so both
+// surfaces get identical behaviour AND the same rate limit for free — a
+// leaked WEBHOOK_SECRET or an over-eager finger on either interface can't
+// spam real LLM/image-gen calls or real publishes.
+const STAGE_COOLDOWN_MS: Record<Stage, number> = {
+  generate: 5 * 60_000,
+  instagram: 5 * 60_000,
+  publish: 2 * 60_000,
+  health: 60_000,
+};
+
+export async function runStage(env: Env, store: Store, ctx: ExecutionContext, stage: Stage): Promise<string> {
+  const allowed = await store.claimRateLimit(`run:${stage}`, STAGE_COOLDOWN_MS[stage]);
+  if (!allowed) {
+    return `⏳ "${stage}" was triggered too recently — wait a bit before retrying (cooldown: ${STAGE_COOLDOWN_MS[stage] / 1000}s).`;
+  }
+
+  switch (stage) {
+    case 'generate':  await generateTextPlatforms(env, store, ctx); break;
+    case 'instagram': await generateInstagramDraft(env, store, ctx); break;
+    case 'publish':   await publishDueAll(env, store, ctx); break;
+    case 'health':    await health(env, store); break;
+  }
+  return `✅ "${stage}" finished`;
+}
+
 export default {
   /**
    * Cron Triggers DO NOT RETRY. A thrown exception means the run is silently
@@ -105,7 +149,7 @@ export default {
     })());
   },
 
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     try {
       if (url.pathname === '/auth/linkedin') return startLinkedInAuth(env);
@@ -119,8 +163,50 @@ export default {
       if (url.pathname === '/feed.xml') return await renderRssFeed(env);
 
       // The unguessable path segment is the shared secret with Telegram.
-      if (url.pathname === `/tg/${env.WEBHOOK_SECRET}` && request.method === 'POST') {
-        return await handleTelegramWebhook(request, env);
+      if (url.pathname.startsWith('/tg/') && request.method === 'POST') {
+        const secret = url.pathname.slice('/tg/'.length);
+        if (!timingSafeEqual(secret, env.WEBHOOK_SECRET)) return new Response('not found', { status: 404 });
+        return await handleTelegramWebhook(request, env, ctx);
+      }
+
+      // Manual pipeline trigger — same effect as waiting for that stage's
+      // real cron, just started on demand (testing, or catching up after a
+      // gap) instead of on the clock. Same "unguessable path segment as
+      // shared secret" pattern as the Telegram webhook above, reusing
+      // WEBHOOK_SECRET rather than adding a new one, and rate-limited via
+      // runStage() — see its comment. Runs synchronously so the HTTP
+      // response only returns once the stage has actually finished (and,
+      // for generate stages, after the Telegram approval message has been
+      // sent) — this is a debug/ops tool, not a hot path, favour a response
+      // you can trust over a fast one.
+      if (url.pathname.startsWith('/run/status/') && request.method === 'GET') {
+        const secret = url.pathname.split('/')[3] ?? '';
+        if (!timingSafeEqual(secret, env.WEBHOOK_SECRET)) return new Response('not found', { status: 404 });
+        const store = storeFor(env);
+        try {
+          const [drafts, last, seeds] = await Promise.all([
+            store.listActive(10), store.lastRun(), store.seedCount(),
+          ]);
+          return new Response(JSON.stringify({ drafts, last_run: last, seeds_in_queue: seeds }, null, 2), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } finally {
+          await store.close();
+        }
+      }
+
+      const runMatch = url.pathname.match(/^\/run\/(generate|instagram|publish|health)\/([^/]+)$/);
+      if (runMatch && request.method === 'GET') {
+        const [, stage, secret] = runMatch;
+        if (!timingSafeEqual(secret, env.WEBHOOK_SECRET)) return new Response('not found', { status: 404 });
+
+        const store = storeFor(env);
+        try {
+          const result = await runStage(env, store, ctx, stage as Stage);
+          return new Response(result);
+        } finally {
+          await store.close();
+        }
       }
 
       return new Response('not found', { status: 404 });

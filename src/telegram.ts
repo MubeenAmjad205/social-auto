@@ -172,20 +172,30 @@ export async function sendCarouselForApproval(
  * anyone approve or reject drafts under your name. This is the actual
  * authorization check; the URL secret is only obscurity on top of it.
  *
- * Checks `callback_query.from.id` (who pressed the button) before falling
- * back to `callback_query.message.chat.id` — `message` is documented by
- * Telegram as optional on a callback_query (absent for old/inaccessible
- * messages), while `from` is always present. Checking `message.chat.id`
- * only would incorrectly reject a legitimate tap on a stale message.
+ * Checks BOTH `callback_query.from.id` (who pressed the button) AND
+ * `callback_query.message.chat.id` (which chat the button lives in) —
+ * either one matching TELEGRAM_CHAT_ID authorizes. Both are needed because
+ * TELEGRAM_CHAT_ID can be either shape: a positive personal user id (1:1 DM
+ * with the bot — `from.id` matches, since chat id == user id there), or a
+ * negative group id (bot added to a group — only `message.chat.id` matches;
+ * `from.id` is always the tapping user's personal id, which is never equal
+ * to a negative group id). `message` is documented by Telegram as optional
+ * on a callback_query (absent for old/inaccessible messages), which is why
+ * this falls back to `from.id` alone rather than requiring both.
  */
 function isAuthorized(update: any, env: Env): boolean {
-  const chatId = update.callback_query?.from?.id
-    ?? update.callback_query?.message?.chat?.id
-    ?? update.message?.chat?.id;
-  return chatId != null && String(chatId) === String(env.TELEGRAM_CHAT_ID);
+  const configured = String(env.TELEGRAM_CHAT_ID);
+  if (update.callback_query) {
+    const fromId = update.callback_query.from?.id;
+    const chatId = update.callback_query.message?.chat?.id;
+    return (fromId != null && String(fromId) === configured)
+      || (chatId != null && String(chatId) === configured);
+  }
+  const msgChatId = update.message?.chat?.id;
+  return msgChatId != null && String(msgChatId) === configured;
 }
 
-export async function handleTelegramWebhook(request: Request, env: Env): Promise<Response> {
+export async function handleTelegramWebhook(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const update = await request.json<any>();
 
   if (!isAuthorized(update, env)) {
@@ -201,7 +211,7 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
     return new Response('ok');
   }
 
-  const { storeFor } = await import('./index');
+  const { storeFor, runStage } = await import('./index');
   const store = storeFor(env);
 
   try {
@@ -255,7 +265,7 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
             imageUrls: imageKeys, // already public URLs — see renderAndUploadCarousel
           });
         } else {
-          const imageKey = await renderImage(env, store, draft.image_prompt);
+          const { url: imageKey } = await renderImage(env, store, draft.image_prompt);
           await store.setStatus(draftId, draft.status, { image_key: imageKey });
           await sendDraftForApproval(env, {
             id: draftId,
@@ -345,6 +355,54 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
         const post = await generateCaseStudy(env, description);
         await notify(env, `📄 *Company Page draft* — not auto-published, paste this yourself:\n\n${post}`);
       }
+      return new Response('ok');
+    }
+
+    // ---- manual pipeline triggers — the same four stages the real crons
+    // run on a schedule, started on demand instead. Same rate limit as the
+    // /run/<stage>/<secret> HTTP routes (src/index.ts's runStage) since both
+    // surfaces share that one function — spamming either can't outrun it.
+    const STAGE_LABEL: Record<string, string> = {
+      generate: 'text-platform drafts', instagram: 'Instagram carousel',
+      publish: 'publish queue', health: 'token/seed health check',
+    };
+    const stageMatch = text.match(/^\/(generate|instagram|publish|health)\b/);
+    if (stageMatch) {
+      const stage = stageMatch[1] as 'generate' | 'instagram' | 'publish' | 'health';
+      await notify(env, `⏳ Running ${STAGE_LABEL[stage]}…`);
+      try {
+        const result = await runStage(env, store, ctx, stage);
+        await notify(env, result);
+      } catch (err: any) {
+        await notify(env, `⚠️ /${stage} failed: ${err?.message ?? err}`);
+      }
+      return new Response('ok');
+    }
+
+    if (text.startsWith('/help') || text.startsWith('/start')) {
+      await notify(env, [
+        '*Commands*',
+        '',
+        '_Feed it material_',
+        '`/seed <what happened>` — bank material for the next draft',
+        '`/seed client <what happened>` — same, framed as client work',
+        '`/seed <note> | angle: <takeaway>` — with an explicit angle',
+        '',
+        '_Check state_',
+        '`/status` — seed count + last run',
+        '`/pending` — drafts waiting on you right now',
+        '',
+        '_Run a stage on demand_ (same as waiting for its cron)',
+        '`/generate` — LinkedIn/Bluesky/Threads/Mastodon drafts',
+        '`/instagram` — Instagram carousel',
+        '`/publish` — publish anything approved',
+        '`/health` — token refresh + low-seed-queue check',
+        '',
+        '_Other_',
+        '`/casestudy <what you delivered>` — Company Page draft (manual paste)',
+        '',
+        'Approve/Reject/Redraw happen via the buttons under each draft, not a command.',
+      ].join('\n'));
       return new Response('ok');
     }
 

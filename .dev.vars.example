@@ -50,9 +50,10 @@ MASTODON_ACCESS_TOKEN=
 CLOUDINARY_API_KEY=
 CLOUDINARY_API_SECRET=
 
-# OPTIONAL — only needed if IMAGE_PROVIDER is set to "gemini" in
-# wrangler.jsonc (default is "workers-ai", which needs none of this).
-# Free, no card: aistudio.google.com/apikey. See src/image-providers.ts.
+# OPTIONAL — only needed if "gemini" appears in the IMAGE_PROVIDER fallback
+# chain in wrangler.jsonc. Leaving this blank is safe: that provider just
+# fails fast and the chain falls through to the next one (see
+# src/image-providers.ts). Free, no card: aistudio.google.com/apikey.
 GEMINI_API_KEY=
 
 # OPTIONAL — last-resort email alert if Telegram itself fails to deliver a

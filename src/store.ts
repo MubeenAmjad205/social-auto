@@ -85,6 +85,13 @@ export interface Store {
   activeStyleRefs(): Promise<string[]>;
   addStyleRef(imageKey: string): Promise<void>;
 
+  // Cooldown for manually-triggered pipeline stages (src/index.ts's runStage,
+  // shared by the /run/* HTTP routes and the Telegram command center) — a
+  // leaked WEBHOOK_SECRET or an over-eager finger shouldn't be able to spam
+  // real LLM/image-gen calls or real publishes. Returns true (and claims the
+  // slot) if `key` hasn't fired within `minIntervalMs`, false otherwise.
+  claimRateLimit(key: string, minIntervalMs: number): Promise<boolean>;
+
   logRun(r: unknown): Promise<void>;
   lastRun(): Promise<any | null>;
   recordPost(p: unknown): Promise<void>;
@@ -309,6 +316,28 @@ export class MongoStore implements Store {
   async listPosts(limit: number): Promise<any[]> {
     const db = await this.conn();
     return db.collection('posts').find({}).sort({ published_at: -1 }).limit(limit).toArray();
+  }
+
+  // Deliberately NOT atomic (read, then write) — a coordinated race landing
+  // two requests in the same few-millisecond gap would let both through once.
+  // That's an acceptable trade for a solo-operator debug/ops tool; the thing
+  // actually worth blocking is repeated hammering over seconds/minutes, which
+  // this does correctly. A findOneAndUpdate with a $lt filter would close
+  // that gap but has its own upsert/duplicate-key hazard against an existing
+  // recent document — not worth the complexity here.
+  async claimRateLimit(key: string, minIntervalMs: number): Promise<boolean> {
+    const db = await this.conn();
+    const doc = await db.collection('rate_limits').findOne({ _id: key as any });
+    const now = new Date();
+    if (doc?.last_at && now.getTime() - new Date(doc.last_at).getTime() < minIntervalMs) {
+      return false;
+    }
+    await db.collection('rate_limits').updateOne(
+      { _id: key as any },
+      { $set: { last_at: now } },
+      { upsert: true }
+    );
+    return true;
   }
 
   async seenSource(url: string): Promise<boolean> {

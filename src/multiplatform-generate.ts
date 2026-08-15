@@ -24,7 +24,6 @@ import type { Env } from './index';
 import type { Fact, Seed, Store } from './store';
 import { research } from './research';
 import { write, artDirect, renderImage, edit, BANNED } from './generate';
-import { resolveProvider } from './image-providers';
 import { sendDraftForApproval, notify } from './telegram';
 import { enabledTextPlatforms, type TextPlatform } from './platforms';
 import { fitBlueskyText } from './bluesky';
@@ -111,8 +110,7 @@ export async function generateTextPlatforms(env: Env, store: Store, ctx: Executi
     const representative = texts.linkedin ?? texts[produced[0]]!;
     const imagePrompt = await artDirect(env, representative);
     t = Date.now();
-    const imageKey = await renderImage(env, store, imagePrompt);
-    const provider = resolveProvider(env);
+    const { url: imageKey, provider } = await renderImage(env, store, imagePrompt);
     steps.push({
       name: 'image', ms: Date.now() - t,
       neurons_est: provider === 'workers-ai' ? 104 : 0,
