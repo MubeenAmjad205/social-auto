@@ -28,6 +28,7 @@ was the one thing that required a card, and it's gone.
 
 ## Layout
 
+
 ```
 wrangler.jsonc              bindings, crons, vars, wasm/font bundler rules
 spike/atlas-check.ts        RUN THIS FIRST — proves or kills the all-Atlas plan
