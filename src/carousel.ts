@@ -25,20 +25,26 @@ export interface Slide {
   kind: SlideKind;
   heading: string;
   body?: string;
+  imageUrl?: string;
 }
 
 const SIZE = 1080; // Instagram's preferred square dimension.
 
-// A small rotating set of dark editorial gradients — consistency across
-// slides (and across posts) is what makes a feed read as deliberate. See the
-// FLUX.2 multi-reference rationale in docs/09-resources.md; this is the same
-// idea applied to a medium that doesn't need a model at all.
-const PALETTES: Array<[string, string]> = [
-  ['#0f1420', '#1c2740'], // slate
-  ['#151018', '#2a1b2e'], // plum
-  ['#0e1512', '#16281f'], // pine
-  ['#171310', '#2e2016'], // umber
+// Dark editorial gradients with vibrant accent colors
+const PALETTES: Array<[string, string, string]> = [
+  ['#0a0f1d', '#141e36', '#38bdf8'], // Deep Slate with Cyan accent
+  ['#120c18', '#23152c', '#a855f7'], // Deep Plum with Purple accent
+  ['#0a1410', '#12261c', '#34d399'], // Deep Pine with Emerald accent
+  ['#16100c', '#2c1e15', '#fb923c'], // Deep Umber with Amber accent
 ];
+
+const BADGES: Record<SlideKind, string> = {
+  cover: '✦ TECHNICAL INSIGHT',
+  point: '✦ SYSTEM ARCHITECTURE',
+  example: '✦ REAL-WORLD IMPLEMENTATION',
+  takeaway: '✦ KEY TAKEAWAY',
+  cta: '✦ ACTION ITEM',
+};
 
 export function renderCarousel(slides: Slide[], paletteSeed = 0): string[] {
   return slides.map((slide, i) =>
@@ -50,24 +56,42 @@ export function renderSlideSVG(
   slide: Slide,
   index: number,
   total: number,
-  [bgFrom, bgTo]: [string, string]
+  [bgFrom, bgTo, accent]: [string, string, string]
 ): string {
-  const pad = 96;
+  const pad = 80;
   const contentWidth = SIZE - pad * 2;
 
-  const headingSize = slide.kind === 'cover' ? 76 : 60;
+  const badgeText = BADGES[slide.kind] ?? '✦ INSIGHT';
+  const badgeSvg = `
+    <g transform="translate(${pad}, 90)">
+      <rect x="0" y="0" width="${badgeText.length * 14 + 32}" height="42" rx="21" fill="${accent}" fill-opacity="0.15" stroke="${accent}" stroke-opacity="0.4" stroke-width="1.5"/>
+      <text x="16" y="27" font-family="Inter" font-size="20" font-weight="700" fill="${accent}" letter-spacing="1">${badgeText}</text>
+    </g>
+  `;
+
+  const headingSize = slide.kind === 'cover' ? 68 : 54;
   const headingLines = wrap(slide.heading, contentWidth, headingSize, true);
-  const bodyLines = slide.body ? wrap(slide.body, contentWidth, 40, false) : [];
+  const bodyLines = slide.body ? wrap(slide.body, contentWidth, 36, false) : [];
 
-  const headingY = slide.body ? 420 : 480;
-  const headingBlock = textBlock(headingLines, pad, headingY, headingSize, 700, '#f5f3ef', 1.25);
+  const headingY = 210;
+  const headingBlock = textBlock(headingLines, pad + 32, headingY + 40, headingSize, 700, '#ffffff', 1.25);
 
-  const bodyStartY = headingY + headingLines.length * headingSize * 1.25 + 56;
-  const bodyBlock = textBlock(bodyLines, pad, bodyStartY, 40, 400, '#c9c4ba', 1.5);
+  const bodyStartY = headingY + 40 + headingLines.length * headingSize * 1.25 + 32;
+  const bodyBlock = textBlock(bodyLines, pad + 32, bodyStartY, 36, 400, '#d1d5db', 1.45);
+
+  const cardHeight = Math.max(540, bodyStartY + bodyLines.length * 36 * 1.45 - 150);
+  
+  const glassCard = `
+    <rect x="${pad}" y="170" width="${contentWidth}" height="${cardHeight}" rx="32" fill="#000000" fill-opacity="0.35" stroke="#ffffff" stroke-opacity="0.12" stroke-width="1.5"/>
+    <line x1="${pad + 32}" y1="170" x2="${pad + 120}" y2="170" stroke="${accent}" stroke-width="4" stroke-linecap="round"/>
+  `;
 
   const footer = slide.kind === 'cta'
-    ? `<text x="${pad}" y="${SIZE - 80}" font-family="Inter" font-size="32" font-weight="700" fill="#f5f3ef">Save this ↓</text>`
-    : `<text x="${pad}" y="${SIZE - 80}" font-family="Inter" font-size="28" font-weight="400" fill="#8a8577">${index + 1} / ${total}</text>`;
+    ? `<g transform="translate(${pad}, ${SIZE - 90})">
+         <rect x="0" y="-36" width="220" height="52" rx="26" fill="${accent}"/>
+         <text x="110" y="-2" font-family="Inter" font-size="24" font-weight="700" fill="#000000" text-anchor="middle">Save This ↓</text>
+       </g>`
+    : `<text x="${pad}" y="${SIZE - 75}" font-family="Inter" font-size="26" font-weight="600" fill="#9ca3af">${index + 1} / ${total}</text>`;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}">
   <defs>
@@ -77,6 +101,9 @@ export function renderSlideSVG(
     </linearGradient>
   </defs>
   <rect width="${SIZE}" height="${SIZE}" fill="url(#bg)"/>
+  <circle cx="${SIZE - 100}" cy="100" r="250" fill="${accent}" fill-opacity="0.08" filter="blur(60px)"/>
+  ${badgeSvg}
+  ${glassCard}
   ${headingBlock}
   ${bodyBlock}
   ${footer}

@@ -115,13 +115,20 @@ export async function runStage(env: Env, store: Store, ctx: ExecutionContext, st
     return `⏳ "${stage}" was triggered too recently — wait a bit before retrying (cooldown: ${STAGE_COOLDOWN_MS[stage] / 1000}s).`;
   }
 
-  switch (stage) {
-    case 'generate':  await generateTextPlatforms(env, store, ctx); break;
-    case 'instagram': await generateInstagramDraft(env, store, ctx); break;
-    case 'publish':   await publishDueAll(env, store, ctx); break;
-    case 'health':    await health(env, store); break;
-  }
-  return `✅ "${stage}" finished`;
+  ctx.waitUntil((async () => {
+    try {
+      switch (stage) {
+        case 'generate':  await generateTextPlatforms(env, store, ctx); break;
+        case 'instagram': await generateInstagramDraft(env, store, ctx); break;
+        case 'publish':   await publishDueAll(env, store, ctx); break;
+        case 'health':    await health(env, store); break;
+      }
+    } catch (err: any) {
+      await notify(env, `🔴 Stage "${stage}" failed: ${err?.message ?? err}`).catch(() => {});
+    }
+  })());
+
+  return `⏳ Stage "${stage}" started in background — results will be sent to Telegram.`;
 }
 
 export default {
