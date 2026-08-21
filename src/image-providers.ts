@@ -81,8 +81,8 @@ export async function generateImageBytes(env: Env, store: Store, provider: Image
 async function workersAiImage(env: Env, store: Store, prompt: string): Promise<GeneratedImage> {
   const form = new FormData();
   form.append('prompt', prompt);
-  form.append('width', '1024');
-  form.append('height', '1024');
+  form.append('width', '768');
+  form.append('height', '768');
 
   // Style references: up to 4 previously-approved images, each under 512x512.
   // This is what makes the feed look like one designer made it. Almost nobody
@@ -137,7 +137,7 @@ async function geminiImage(env: Env, prompt: string): Promise<GeneratedImage> {
   if (!env.GEMINI_API_KEY) throw new Error('gemini provider needs a GEMINI_API_KEY secret');
 
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${env.GEMINI_API_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash-image:generateContent?key=${env.GEMINI_API_KEY}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
