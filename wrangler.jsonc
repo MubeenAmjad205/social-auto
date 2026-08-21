@@ -66,7 +66,7 @@
 
     // Mastodon is federated — there's no single API host. Whatever server
     // your account lives on. See docs/setup/mastodon.md.
-    "MASTODON_INSTANCE_URL": "https://REPLACE-ME.example.social",
+    "MASTODON_INSTANCE_URL": "",
     // Optional. Mastodon's default is 500; some instances allow more.
     "MASTODON_MAX_CHARS": "500",
 
