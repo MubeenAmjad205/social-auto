@@ -39,12 +39,21 @@ function ensureInit(): Promise<void> {
   return ready;
 }
 
+let fontBuffers: Uint8Array[] | null = null;
+
+function getFontBuffers(): Uint8Array[] {
+  if (!fontBuffers) {
+    fontBuffers = [new Uint8Array(INTER_REGULAR), new Uint8Array(INTER_BOLD)];
+  }
+  return fontBuffers;
+}
+
 export async function svgToPng(svg: string): Promise<Uint8Array> {
   await ensureInit();
 
   const resvg = new Resvg(svg, {
     font: {
-      fontBuffers: [new Uint8Array(INTER_REGULAR), new Uint8Array(INTER_BOLD)],
+      fontBuffers: getFontBuffers(),
       loadSystemFonts: false,
       defaultFontFamily: 'Inter',
     },

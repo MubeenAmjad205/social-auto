@@ -101,7 +101,7 @@ export function renderSlideSVG(
     </linearGradient>
   </defs>
   <rect width="${SIZE}" height="${SIZE}" fill="url(#bg)"/>
-  <circle cx="${SIZE - 100}" cy="100" r="250" fill="${accent}" fill-opacity="0.08" filter="blur(60px)"/>
+  <circle cx="${SIZE - 100}" cy="100" r="250" fill="${accent}" fill-opacity="0.08"/>
   ${badgeSvg}
   ${glassCard}
   ${headingBlock}

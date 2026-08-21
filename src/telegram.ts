@@ -159,18 +159,40 @@ export async function sendCarouselForApproval(
   env: Env,
   d: { id: string; body: string; flags: string[]; sourceCount: number; imageUrls: string[] }
 ) {
-  await fetch(api(env, 'sendMediaGroup'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: env.TELEGRAM_CHAT_ID,
-      media: d.imageUrls.slice(0, 10).map((url, i) => ({
-        type: 'photo',
-        media: url,
-        ...(i === 0 ? { caption: `Slide 1 of ${d.imageUrls.length}` } : {}),
-      })),
-    }),
-  });
+  try {
+    const res = await fetch(api(env, 'sendMediaGroup'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: env.TELEGRAM_CHAT_ID,
+        media: d.imageUrls.slice(0, 10).map((url, i) => ({
+          type: 'photo',
+          media: url,
+          ...(i === 0 ? { caption: `Slide 1 of ${d.imageUrls.length}` } : {}),
+        })),
+      }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn('sendMediaGroup returned error, falling back to sendPhoto:', errText);
+      if (d.imageUrls[0]) {
+        await fetch(api(env, 'sendPhoto'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, photo: d.imageUrls[0] }),
+        });
+      }
+    }
+  } catch (err: any) {
+    console.warn('sendMediaGroup failed, sending fallback photo:', err?.message ?? err);
+    if (d.imageUrls[0]) {
+      await fetch(api(env, 'sendPhoto'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, photo: d.imageUrls[0] }),
+      }).catch(() => {});
+    }
+  }
 
   await sendApprovalControls(env, { id: d.id, label: 'instagram carousel', body: d.body, flags: d.flags, sourceCount: d.sourceCount });
 }
