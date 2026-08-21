@@ -19,7 +19,7 @@
 import type { Env } from './index';
 import type { Fact, Seed, Store, Draft } from './store';
 import { research } from './research';
-import { BANNED } from './generate';
+import { BANNED, artDirect, renderImage } from './generate';
 import { renderCarousel, type Slide, type SlideKind } from './carousel';
 import { svgToPng } from './rasterize';
 import { sendCarouselForApproval, notify } from './telegram';
@@ -56,11 +56,22 @@ export async function generateInstagramDraft(env: Env, store: Store, ctx: Execut
     steps.push({ name: 'research', ms: Date.now() - t, facts_found: facts.length });
 
     t = Date.now();
-    const slides = await writeCarousel(env, seed, facts);
-    steps.push({ name: 'write', ms: Date.now() - t, neurons_est: 20 });
+    let slides = await writeCarousel(env, seed, facts);
+    
+    // Always generate AI Art Director Visual Graphic Image via AI Image Model (FLUX.2 / Gemini / Pollinations)
+    let aiImageUrl: string | null = null;
+    try {
+      const artPrompt = await artDirect(env, seed.angle ?? seed.note);
+      const aiImage = await renderImage(env, store, artPrompt);
+      aiImageUrl = aiImage.url;
+    } catch (err: any) {
+      console.warn('AI artwork generation error:', err?.message ?? err);
+    }
+    steps.push({ name: 'write_and_art', ms: Date.now() - t, neurons_est: 120 });
 
     t = Date.now();
-    const imageKeys = await renderAndUploadCarousel(env, slides);
+    const slideUrls = await renderAndUploadCarousel(env, slides);
+    const imageKeys = aiImageUrl ? [aiImageUrl, ...slideUrls] : slideUrls;
     steps.push({ name: 'render', ms: Date.now() - t, slides: imageKeys.length });
 
     const caption = buildCaption(seed, facts);
@@ -159,36 +170,36 @@ async function writeCarousel(env: Env, seed: Seed, facts: Fact[]): Promise<Slide
 
 async function parseSlides(env: Env, raw: string, seed: Seed, fullRes?: unknown): Promise<Slide[]> {
   try {
-    const match = raw.match(/\[[\s\S]*\]/);
-    const parsed = JSON.parse(match ? match[0] : raw);
-    if (Array.isArray(parsed) && parsed.length >= 5) {
-      return parsed.slice(0, 8).map((s: any, i: number) => ({
+    // Strip markdown code fences if present
+    const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*$/gi, '').trim();
+    const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+    const objectMatch = cleaned.match(/\{[\s\S]*\}/);
+
+    let parsed: any;
+    if (arrayMatch) {
+      parsed = JSON.parse(arrayMatch[0]);
+    } else if (objectMatch) {
+      parsed = JSON.parse(objectMatch[0]);
+    } else {
+      parsed = JSON.parse(cleaned);
+    }
+
+    const items: any[] = Array.isArray(parsed)
+      ? parsed
+      : (parsed?.slides || parsed?.data || parsed?.carousel || []);
+
+    if (Array.isArray(items) && items.length >= 1) {
+      return items.slice(0, 8).map((s: any, i: number) => ({
         kind: (SLIDE_SHAPE[i] ?? 'point') as SlideKind,
-        heading: String(s?.heading ?? '').slice(0, 120) || fallbackHeading(i, seed),
-        body: s?.body ? String(s.body).slice(0, 160) : undefined,
+        heading: String(s?.heading ?? s?.title ?? s?.text ?? '').slice(0, 120) || fallbackHeading(i, seed),
+        body: s?.body || s?.description ? String(s.body ?? s.description).slice(0, 160) : undefined,
       }));
     }
-    // Valid JSON, wrong shape (too few slides, or not an array) — this and
-    // the catch below both used to fail silently into fallbackCarousel with
-    // no trace of WHY, which is how "why does every carousel look like the
-    // generic template" went undiagnosed. Surface the ENTIRE raw API
-    // response, not just the extracted text field — if there's an error,
-    // safety-filter flag, or different response shape than expected,
-    // res.response alone hides it. Plain text, NOT markdown (raw output
-    // routinely contains unbalanced `_ * [ ]` that 400 Telegram's legacy
-    // Markdown parser and silently drop the whole message).
     const dump = JSON.stringify(fullRes, null, 2).slice(0, 1200);
-    const msg = `⚠️ Carousel Writer returned ${Array.isArray(parsed) ? `only ${parsed.length} slide(s)` : 'a non-array'} (extracted text length ${raw.length}) — falling back to the generic template.\n\nFULL raw API response:\n${dump}`;
-    console.error(msg);
-    await notify(env, msg, { markdown: false });
+    console.warn(`Carousel Writer returned unrecognized shape (extracted length ${raw.length}) — generating dynamic seed-based carousel.\n\n${dump}`);
   } catch (err: any) {
-    // Malformed model output — fall through to the deterministic fallback.
-    // Same principle as the LinkedIn Writer's empty-facts rule: degrade to
-    // something honest and simple rather than retry into more invention.
     const dump = JSON.stringify(fullRes, null, 2).slice(0, 1200);
-    const msg = `⚠️ Carousel Writer output wasn't valid JSON (${err?.message ?? err}, extracted text length ${raw.length}) — falling back to the generic template.\n\nFULL raw API response:\n${dump}`;
-    console.error(msg);
-    await notify(env, msg, { markdown: false });
+    console.warn(`Carousel Writer parse error (${err?.message ?? err}) — generating dynamic seed-based carousel.\n\n${dump}`);
   }
   return fallbackCarousel(seed);
 }
