@@ -2,7 +2,7 @@
   "name": "social-worker",
   "version": "1.0.0",
   "private": true,
-  "description": "Assisted LinkedIn publishing pipeline — Cloudflare Workers, MongoDB Atlas, Telegram approval",
+  "description": "Assisted LinkedIn publishing pipeline \u2014 Cloudflare Workers, MongoDB Atlas, Telegram approval",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
@@ -15,7 +15,9 @@
   },
   "dependencies": {
     "@resvg/resvg-wasm": "^2.6.2",
+    "dotenv": "^8.2.0",
     "mongodb": "^7.5.0",
+    "node-fetch": "^3.3.2",
     "worker-mailer": "^1.2.1"
   },
   "devDependencies": {
